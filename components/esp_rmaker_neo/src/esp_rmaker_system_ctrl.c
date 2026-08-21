@@ -17,6 +17,7 @@
 
 /* Standard includes */
 #include <stddef.h>
+#include <string.h>
 
 /* Platform common includes */
 #include "osal_sysctrl.h"
@@ -47,6 +48,9 @@
 /* Max time to wait for the node_reset notification's QoS1 publish to flush before wiping. */
 #define SYSTEM_CTRL_NODE_RESET_NOTIFY_TIMEOUT_MS 3000
 
+/* Max number of registered factory reset participants. */
+#define SYSTEM_CTRL_FACTORY_RESET_PARTICIPANT_MAX_COUNT 4
+
 /* Types **************************************************************/
 
 /**
@@ -69,6 +73,13 @@ static const char *TAG = "rmng_system_ctrl";
 
 /* Default network-credential reset function, set via esp_rmaker_system_ctrl_register_network_reset_fn(). */
 static esp_rmaker_system_ctrl_network_reset_fn_t g_network_reset_fn = NULL;
+
+/* Registered factory reset participants, in registration order. */
+static esp_rmaker_system_ctrl_factory_reset_participant_t g_factory_reset_participants[SYSTEM_CTRL_FACTORY_RESET_PARTICIPANT_MAX_COUNT];
+static uint8_t g_factory_reset_participant_count = 0;
+
+/* Set while a factory reset is running, so a reset a participant's own wipe triggers is a no-op. */
+static bool g_factory_reset_in_progress = false;
 
 /* Private function declarations **********************************************************/
 
@@ -121,6 +132,35 @@ static esp_rmaker_error_t __system_ctrl_network_reset(__system_ctrl_reset_data_t
  * @return ESP_RMAKER_OK on success, otherwise error code.
  */
 static esp_rmaker_error_t __system_ctrl_factory_reset(__system_ctrl_reset_data_t *reset_data);
+
+/**
+ * @brief Run one participant's wipe, logging a failure.
+ * @param[in] participant The participant to wipe.
+ * @return The wipe's return value.
+ */
+static esp_rmaker_error_t __run_factory_reset_participant(const esp_rmaker_system_ctrl_factory_reset_participant_t *participant);
+
+/**
+ * @brief Wipe every registered factory reset participant except @p skip.
+ *
+ * Best-effort: a failing wipe does not stop the others. A participant declaring reboots_on_wipe is
+ * wiped last, so an earlier restart cannot strand the other wipes.
+ *
+ * @param[in] skip Wipe function to leave out, or NULL to wipe all of them.
+ * @return ESP_RMAKER_OK if every wipe succeeded, otherwise the first error encountered.
+ */
+static esp_rmaker_error_t __run_factory_reset_participants(esp_rmaker_system_ctrl_factory_reset_wipe_fn_t skip);
+
+/**
+ * @brief Run the whole factory reset: wipe the RainMaker Neo data, the participants, then reboot.
+ *
+ * @param[in] self Wipe function of the participant that started the reset, skipped in the sweep.
+ * @param[in] network_reset_fn Function to reset the network credentials, or NULL to use the registered one.
+ * @param[in] reset_reboot_s Reboot timeout in seconds; a negative value leaves the reboot to the caller.
+ * @return ESP_RMAKER_OK if every step succeeded, otherwise the first error encountered.
+ */
+static esp_rmaker_error_t __factory_reset_run(esp_rmaker_system_ctrl_factory_reset_wipe_fn_t self,
+        esp_rmaker_system_ctrl_network_reset_fn_t network_reset_fn, int8_t reset_reboot_s);
 
 /**
  * @brief Notify payload fn for the node_reset notification.
@@ -204,24 +244,122 @@ static esp_rmaker_error_t __system_ctrl_network_reset(__system_ctrl_reset_data_t
     return ESP_RMAKER_OK;
 }
 
-static esp_rmaker_error_t __system_ctrl_factory_reset(__system_ctrl_reset_data_t *reset_data)
+static esp_rmaker_error_t __run_factory_reset_participant(const esp_rmaker_system_ctrl_factory_reset_participant_t *participant)
 {
+    OSAL_LOGI(TAG, "Wiping reset participant '%s'", participant->name);
+    esp_rmaker_error_t err = participant->wipe(participant->priv);
+    if (err != ESP_RMAKER_OK) {
+        OSAL_LOGE(TAG, "Reset participant '%s' wipe failed: %d", participant->name, (int) err);
+    }
+    return err;
+}
+
+static esp_rmaker_error_t __run_factory_reset_participants(esp_rmaker_system_ctrl_factory_reset_wipe_fn_t skip)
+{
+    esp_rmaker_error_t first_err = ESP_RMAKER_OK;
+    const esp_rmaker_system_ctrl_factory_reset_participant_t *rebooting = NULL;
+
+    for (uint8_t i = 0; i < g_factory_reset_participant_count; i++) {
+        const esp_rmaker_system_ctrl_factory_reset_participant_t *participant = &g_factory_reset_participants[i];
+        if (participant->wipe == skip) {
+            OSAL_LOGI(TAG, "Reset participant '%s' started this reset; skipping its wipe", participant->name);
+            continue;
+        }
+        if (participant->reboots_on_wipe) {
+            /* At most one such participant exists; the register call rejects a second. */
+            rebooting = participant;
+            continue;
+        }
+        esp_rmaker_error_t err = __run_factory_reset_participant(participant);
+        if (first_err == ESP_RMAKER_OK) {
+            first_err = err;
+        }
+    }
+
+    if (rebooting) {
+        esp_rmaker_error_t err = __run_factory_reset_participant(rebooting);
+        if (first_err == ESP_RMAKER_OK) {
+            first_err = err;
+        }
+        /* Its wipe was documented not to return. Fall through to the caller's reboot. */
+        OSAL_LOGE(TAG, "Reset participant '%s' declared reboots_on_wipe but returned", rebooting->name);
+    }
+
+    return first_err;
+}
+
+static esp_rmaker_error_t __factory_reset_run(esp_rmaker_system_ctrl_factory_reset_wipe_fn_t self,
+        esp_rmaker_system_ctrl_network_reset_fn_t network_reset_fn, int8_t reset_reboot_s)
+{
+    if (g_factory_reset_in_progress) {
+        OSAL_LOGI(TAG, "Factory reset already running; ignoring the nested request");
+        return ESP_RMAKER_OK;
+    }
+    g_factory_reset_in_progress = true;
+
     OSAL_LOGW(TAG, "Executing factory reset");
 
-    esp_rmaker_error_t err = esp_rmaker_system_ctrl_factory_reset_no_reboot(reset_data->network_reset_fn);
-    if (err != ESP_RMAKER_OK) {
-        OSAL_LOGE(TAG, "Factory reset wipe reported errors: %d", (int) err);
+    /* Tell the cloud this node is resetting itself, before wiping credentials/NVS while MQTT
+     * and the node/group identity are still valid. Best-effort: proceed regardless of result, and
+     * do not let it decide the return value - a node with no cloud connection must still wipe. */
+    OSAL_LOGI(TAG, "Notifying cloud of node reset; waiting up to %d ms for acknowledgement",
+              (int) SYSTEM_CTRL_NODE_RESET_NOTIFY_TIMEOUT_MS);
+    esp_rmaker_notification_t node_reset_notification = {
+        .report_payload_fn = __node_reset_payload_fn,
+        .data = NULL,
+    };
+    esp_rmaker_error_t notify_err = esp_rmaker_notify_send_sync(&node_reset_notification, SYSTEM_CTRL_NODE_RESET_NOTIFY_TIMEOUT_MS);
+    if (notify_err != ESP_RMAKER_OK) {
+        OSAL_LOGW(TAG, "Node reset notification not confirmed (%d); proceeding with the reset", (int) notify_err);
+    }
+
+    esp_rmaker_error_t first_err = ESP_RMAKER_OK;
+    esp_rmaker_system_ctrl_network_reset_fn_t resolved_fn = network_reset_fn ? network_reset_fn : g_network_reset_fn;
+    if (resolved_fn == NULL) {
+        OSAL_LOGW(TAG, "No network reset function available; skipping the network credential reset");
+        first_err = ESP_RMAKER_INVALID_ARG;
+    } else {
+        esp_rmaker_error_t network_err = resolved_fn();
+        if (network_err != ESP_RMAKER_OK) {
+            OSAL_LOGE(TAG, "Failed to reset the network credentials: %d", (int) network_err);
+            first_err = network_err;
+        }
+    }
+
+    /* Clear the data even if the network reset failed: leaving stale node data behind is worse
+     * than a node that still holds its network credentials. */
+    esp_rmaker_error_t data_err = esp_rmaker_system_ctrl_clear_data_namespaces();
+    if (data_err != ESP_RMAKER_OK) {
+        OSAL_LOGE(TAG, "Failed to clear the data namespaces: %d", (int) data_err);
+        if (first_err == ESP_RMAKER_OK) {
+            first_err = data_err;
+        }
+    }
+
+    /* Let components holding persistent state outside the data model erase theirs. */
+    esp_rmaker_error_t participant_err = __run_factory_reset_participants(self);
+    if (first_err == ESP_RMAKER_OK) {
+        first_err = participant_err;
     }
 
     /* Reboot even if part of the wipe failed: skipping the reboot would strand the node in a
      * half-reset state with nothing to retry from. */
-    if (reset_data->reset_reboot_s >= 0) {
-        esp_rmaker_error_t reboot_err = esp_rmaker_system_ctrl_reboot((uint8_t) reset_data->reset_reboot_s);
-        if (err == ESP_RMAKER_OK) {
-            err = reboot_err;
+    if (reset_reboot_s >= 0) {
+        esp_rmaker_error_t reboot_err = esp_rmaker_system_ctrl_reboot((uint8_t) reset_reboot_s);
+        if (first_err == ESP_RMAKER_OK) {
+            first_err = reboot_err;
         }
+    } else {
+        /* Nothing is going to restart on our behalf, so the node stays resettable. */
+        g_factory_reset_in_progress = false;
     }
-    return err;
+
+    return first_err;
+}
+
+static esp_rmaker_error_t __system_ctrl_factory_reset(__system_ctrl_reset_data_t *reset_data)
+{
+    return __factory_reset_run(NULL, reset_data->network_reset_fn, reset_data->reset_reboot_s);
 }
 
 static esp_rmaker_error_t __clear_nvs_namespace(const char *name_space)
@@ -403,53 +541,67 @@ esp_rmaker_error_t esp_rmaker_system_ctrl_factory_reset(uint8_t reset_s, int8_t 
     }
 }
 
-esp_rmaker_error_t esp_rmaker_system_ctrl_factory_reset_no_reboot(esp_rmaker_system_ctrl_network_reset_fn_t network_reset_fn)
+esp_rmaker_error_t esp_rmaker_system_ctrl_factory_reset_from_participant(esp_rmaker_system_ctrl_factory_reset_wipe_fn_t self,
+        esp_rmaker_system_ctrl_network_reset_fn_t network_reset_fn, int8_t reset_reboot_s)
 {
-    esp_rmaker_error_t first_err = ESP_RMAKER_OK;
-
-    /* Tell the cloud this node is resetting itself, before wiping credentials/NVS while MQTT
-     * and the node/group identity are still valid. Best-effort: proceed regardless of result, and
-     * do not let it decide the return value - a node with no cloud connection must still wipe. */
-    OSAL_LOGI(TAG, "Notifying cloud of node reset; waiting up to %d ms for acknowledgement",
-              (int) SYSTEM_CTRL_NODE_RESET_NOTIFY_TIMEOUT_MS);
-    esp_rmaker_notification_t node_reset_notification = {
-        .report_payload_fn = __node_reset_payload_fn,
-        .data = NULL,
-    };
-    esp_rmaker_error_t notify_err = esp_rmaker_notify_send_sync(&node_reset_notification, SYSTEM_CTRL_NODE_RESET_NOTIFY_TIMEOUT_MS);
-    if (notify_err != ESP_RMAKER_OK) {
-        OSAL_LOGW(TAG, "Node reset notification not confirmed (%d); proceeding with the reset", (int) notify_err);
-    }
-
-    esp_rmaker_system_ctrl_network_reset_fn_t resolved_fn = network_reset_fn ? network_reset_fn : g_network_reset_fn;
-    if (resolved_fn == NULL) {
-        OSAL_LOGW(TAG, "No network reset function available; skipping the network credential reset");
-        first_err = ESP_RMAKER_INVALID_ARG;
-    } else {
-        esp_rmaker_error_t network_err = resolved_fn();
-        if (network_err != ESP_RMAKER_OK) {
-            OSAL_LOGE(TAG, "Failed to reset the network credentials: %d", (int) network_err);
-            first_err = network_err;
-        }
-    }
-
-    /* Clear the data even if the network reset failed: leaving stale node data behind is worse
-     * than a node that still holds its network credentials. */
-    esp_rmaker_error_t data_err = esp_rmaker_system_ctrl_clear_data_namespaces();
-    if (data_err != ESP_RMAKER_OK) {
-        OSAL_LOGE(TAG, "Failed to clear the data namespaces: %d", (int) data_err);
-        if (first_err == ESP_RMAKER_OK) {
-            first_err = data_err;
-        }
-    }
-
-    return first_err;
+    return __factory_reset_run(self, network_reset_fn, reset_reboot_s);
 }
 
 esp_rmaker_error_t esp_rmaker_system_ctrl_register_network_reset_fn(esp_rmaker_system_ctrl_network_reset_fn_t network_reset_fn)
 {
     g_network_reset_fn = network_reset_fn;
     return ESP_RMAKER_OK;
+}
+
+esp_rmaker_error_t esp_rmaker_system_ctrl_factory_reset_participant_register(const esp_rmaker_system_ctrl_factory_reset_participant_t *participant)
+{
+    if (participant == NULL || participant->wipe == NULL) {
+        return ESP_RMAKER_INVALID_ARG;
+    }
+
+    int existing = -1;
+    for (uint8_t i = 0; i < g_factory_reset_participant_count; i++) {
+        if (g_factory_reset_participants[i].wipe == participant->wipe) {
+            existing = (int) i;
+        } else if (participant->reboots_on_wipe && g_factory_reset_participants[i].reboots_on_wipe) {
+            OSAL_LOGE(TAG, "Reset participant '%s' already claimed reboots_on_wipe", g_factory_reset_participants[i].name);
+            return ESP_RMAKER_INVALID_STATE;
+        }
+    }
+
+    if (existing >= 0) {
+        g_factory_reset_participants[existing] = *participant;
+        return ESP_RMAKER_OK;
+    }
+    if (g_factory_reset_participant_count >= SYSTEM_CTRL_FACTORY_RESET_PARTICIPANT_MAX_COUNT) {
+        return ESP_RMAKER_NO_MEM;
+    }
+
+    g_factory_reset_participants[g_factory_reset_participant_count++] = *participant;
+    OSAL_LOGI(TAG, "Registered reset participant '%s'", participant->name);
+    return ESP_RMAKER_OK;
+}
+
+esp_rmaker_error_t esp_rmaker_system_ctrl_factory_reset_participant_unregister(esp_rmaker_system_ctrl_factory_reset_wipe_fn_t wipe)
+{
+    if (wipe == NULL) {
+        return ESP_RMAKER_INVALID_ARG;
+    }
+
+    for (uint8_t i = 0; i < g_factory_reset_participant_count; i++) {
+        if (g_factory_reset_participants[i].wipe != wipe) {
+            continue;
+        }
+        /* Shift the rest down: the wipe order follows registration order. */
+        for (uint8_t j = i; j + 1 < g_factory_reset_participant_count; j++) {
+            g_factory_reset_participants[j] = g_factory_reset_participants[j + 1];
+        }
+        g_factory_reset_participant_count--;
+        memset(&g_factory_reset_participants[g_factory_reset_participant_count], 0, sizeof(g_factory_reset_participants[0]));
+        return ESP_RMAKER_OK;
+    }
+
+    return ESP_RMAKER_NOT_FOUND;
 }
 
 esp_rmaker_error_t esp_rmaker_system_ctrl_data_reset(uint8_t reset_s, int8_t reset_reboot_s)
