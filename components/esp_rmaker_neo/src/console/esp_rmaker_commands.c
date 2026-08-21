@@ -122,34 +122,51 @@ static int reset_factory_handler(int argc, char **argv)
 }
 
 #ifdef CONFIG_ESP_RMAKER_ASSISTED_CLAIM
+static esp_rmaker_error_t __erase_claim_data_wipe(void *priv)
+{
+    (void) priv;
+    printf("Erasing claim data (node ID, certificate, private key, MQTT host) from the factory partition...\n");
+    esp_rmaker_error_t err = esp_rmaker_credentials_erase_claim_data();
+    if (err != ESP_RMAKER_OK) {
+        printf("Clearing claim data failed: 0x%x\n", err);
+    }
+    return err;
+}
+
 static int clear_claim_data_handler(int argc, char **argv)
 {
     (void) argc;
     (void) argv;
     /* The claim credentials define the node's cloud identity, so everything keyed to that identity
-     * (node config checksums, local config, per-device values, network credentials) becomes stale
-     * once they are gone. Wipe first, erase the credentials last. */
-    printf("Factory resetting node data...\n");
-    esp_rmaker_error_t reset_err = esp_rmaker_system_ctrl_factory_reset_no_reboot(NULL);
-    if (reset_err != ESP_RMAKER_OK) {
-        printf("Factory resetting node data reported errors: 0x%x (continuing)\n", reset_err);
+     * (node config checksums, local config, per-device values, network credentials, and whatever the
+     * reset participants hold) becomes stale once they are gone. Registering the erase as a
+     * participant puts it in the only window that works: after the node_reset notification, which
+     * resolves its topic from the claim data, and before a participant restarts the node. */
+    const esp_rmaker_system_ctrl_factory_reset_participant_t claim_data = {
+        .name = "claim_data",
+        .reboots_on_wipe = false,
+        .wipe = __erase_claim_data_wipe,
+        .priv = NULL,
+    };
+    esp_rmaker_error_t err = esp_rmaker_system_ctrl_factory_reset_participant_register(&claim_data);
+    if (err != ESP_RMAKER_OK) {
+        printf("Failed to register the claim data erase: 0x%x\n", err);
+        return CONSOLE_FAIL;
     }
 
-    printf("Erasing claim data (node ID, certificate, private key, MQTT host) from the factory partition...\n");
-    esp_rmaker_error_t err = esp_rmaker_credentials_erase_claim_data();
-    if (err != ESP_RMAKER_OK) {
-        printf("Clearing claim data failed: 0x%x\n", err);
+    printf("Factory resetting node data...\n");
+    /* Not esp_rmaker_system_ctrl_factory_reset(): that one refuses to run at all without a network
+     * reset function, and this command must clear the claim data either way. */
+    esp_rmaker_error_t reset_err = esp_rmaker_system_ctrl_factory_reset_from_participant(NULL, NULL, RMAKER_CMD_RESET_REBOOT_S);
+    if (reset_err != ESP_RMAKER_OK) {
+        printf("Factory reset reported errors: 0x%x\n", reset_err);
     } else {
         printf("Claim data erased, and node factory reset complete. The node will be claimed again after rebooting.\n");
     }
 
-    /* Reboot regardless: the data wipe above already happened, so continuing to run on top of it is
-     * worse than rebooting into a re-claim (or, if the erase failed, into the existing claim). */
-    esp_rmaker_error_t reboot_err = esp_rmaker_system_ctrl_reboot(RMAKER_CMD_RESET_REBOOT_S);
-    if (reboot_err != ESP_RMAKER_OK) {
-        printf("Reboot failed: 0x%x\n", reboot_err);
-    }
-    return (err == ESP_RMAKER_OK && reboot_err == ESP_RMAKER_OK) ? CONSOLE_OK : CONSOLE_FAIL;
+    /* Only reached if nothing restarted the node. */
+    (void) esp_rmaker_system_ctrl_factory_reset_participant_unregister(__erase_claim_data_wipe);
+    return reset_err == ESP_RMAKER_OK ? CONSOLE_OK : CONSOLE_FAIL;
 }
 #endif /* CONFIG_ESP_RMAKER_ASSISTED_CLAIM */
 
