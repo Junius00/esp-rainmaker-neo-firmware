@@ -117,6 +117,79 @@
       }
     },
     {
+      "capability": "esp.param.dim",
+      "matter_match": {
+        "cluster": "0x0008",
+        "attribute": "0x0000",
+        "value_type": "nullable_u8"
+      },
+      "transform": {
+        "type": "linear",
+        "in_min": 0,
+        "in_max": 100,
+        "out_min": 1,
+        "out_max": 254
+      },
+      "write_as": {
+        "commands": [
+          {
+            "command": "0x04",
+            "name": "MoveToLevelWithOnOff",
+            "args": [
+              {
+                "field": 0,
+                "name": "Level",
+                "type": "u8",
+                "value": "$value"
+              },
+              {
+                "field": 1,
+                "name": "TransitionTime",
+                "type": "u16",
+                "value": 0
+              },
+              {
+                "field": 2,
+                "name": "OptionsMask",
+                "type": "u8",
+                "value": 0
+              },
+              {
+                "field": 3,
+                "name": "OptionsOverride",
+                "type": "u8",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "startup": {
+        "attribute": "0x4000",
+        "policy": "min_clamp",
+        "min": 1,
+        "note": "StartUpCurrentLevel: 0 means the minimum level per spec, and the mirror's LevelControl minimum is 1."
+      },
+      "deferred_persistence": true,
+      "rule_gated": true,
+      "note": "The dim level of a switch or load control, as esp.param.brightness is of a light: the same LevelControl mapping under the param name the switch device types use. rule_gated, so it lowers only for the rules that name it and a light keeps brightness as its name for the attribute.",
+      "defaults": {
+        "id": "Dim",
+        "data_type": "int",
+        "ui_type": "esp.ui.slider",
+        "properties": [
+          "read",
+          "write"
+        ],
+        "bounds": {
+          "min": 0,
+          "max": 100,
+          "step": 1
+        },
+        "bounds_note": "raising fallback when the device exposes no bounds attribute; lowering ignores it"
+      }
+    },
+    {
       "capability": "esp.param.cct",
       "matter_match": {
         "cluster": "0x0300",
@@ -615,6 +688,58 @@
             "0x0004",
             "0x0040"
           ]
+        }
+      ]
+    },
+    {
+      "device_type": "esp.device.switch",
+      "defaults": {
+        "id": "Switch",
+        "primary": "esp.param.power"
+      },
+      "rules": [
+        {
+          "params": [
+            "esp.param.power",
+            "esp.param.dim"
+          ],
+          "matter_device_type": "0x0110",
+          "matter_device_type_version": 2,
+          "mandatory_clusters": [
+            "0x0003",
+            "0x0004",
+            "0x0040"
+          ],
+          "additional_device_types": [
+            {
+              "id": "0x010B",
+              "version": 5,
+              "mandatory_clusters": [],
+              "note": "Dimmable Plug-In Unit, the type 0x0110 is classified a superset of: declared alongside it so a controller that does not know the mounted types still renders the endpoint. Adds no clusters of its own - its mandatory set is already the matched rule's."
+            }
+          ],
+          "note": "Mounted Dimmable Load Control: a dimmer switch driving a load. The mounted control types are the server-side switch family; Matter's On/Off Switch (0x0103) and its dimmer/colour variants are client device types that originate commands over bindings, which an owned param cannot describe."
+        },
+        {
+          "params": [
+            "esp.param.power"
+          ],
+          "matter_device_type": "0x010F",
+          "matter_device_type_version": 2,
+          "mandatory_clusters": [
+            "0x0003",
+            "0x0004",
+            "0x0040"
+          ],
+          "additional_device_types": [
+            {
+              "id": "0x010A",
+              "version": 4,
+              "mandatory_clusters": [],
+              "note": "On/Off Plug-in Unit, the type 0x010F is classified a superset of - see the 0x0110 rule."
+            }
+          ],
+          "note": "Mounted On/Off Control. Both mounted types mandate the OnOff Lighting feature and, when dimmable, LevelControl OnOff+Lighting - the same feature sets the light rules already build."
         }
       ]
     }

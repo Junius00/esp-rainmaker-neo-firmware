@@ -208,7 +208,7 @@ def test_vocabulary_shrinks_with_the_profile(library):
     lib = dict(library)
     lib["device_types"] = library["device_types"] + [
         {
-            "device_type": "esp.device.switch",
+            "device_type": "esp.device.test-onoff",
             "rules": [
                 {
                     "params": ["esp.param.power"],
@@ -220,7 +220,7 @@ def test_vocabulary_shrinks_with_the_profile(library):
         }
     ]
     mapping, errors = resolve(
-        lib, {"name": "onoff", "device_types": ["esp.device.switch"]}
+        lib, {"name": "onoff", "device_types": ["esp.device.test-onoff"]}
     )
     assert errors == []
     macros = vocabulary_macros(mapping)
