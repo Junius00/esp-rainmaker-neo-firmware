@@ -11,6 +11,8 @@
 #
 # Inputs (env):
 #   IDF_TARGET        required, e.g. esp32c3
+#   IDF_BUILD_APPS_EXTRA_ARGS  optional extra idf-build-apps flags (preview targets need
+#                     --enable-preview-targets, else every app is skipped)
 #   SITE_DIR          required, output root (per-target; artifacts are merged later)
 #   EXAMPLES_DIR      default "examples"
 #   LAUNCHPAD_EXCLUDE optional, space-separated example names or paths to skip
@@ -22,6 +24,7 @@ set -euo pipefail
 
 : "${IDF_TARGET:?IDF_TARGET is not set}"
 : "${SITE_DIR:?SITE_DIR is not set}"
+IDF_BUILD_APPS_EXTRA_ARGS="${IDF_BUILD_APPS_EXTRA_ARGS:-}"
 EXAMPLES_DIR="${EXAMPLES_DIR:-examples}"
 LAUNCHPAD_EXCLUDE="${LAUNCHPAD_EXCLUDE:-}"
 BUILD_TMP="${BUILD_TMP:-$PWD/launchpad_build_tmp}"
@@ -89,7 +92,8 @@ echo "Building launchpad examples for $IDF_TARGET: ${BUILD_DIRS[*]}"
 idf-build-apps build --config-rules "sdkconfig.defaults=default" \
   --target "$IDF_TARGET" \
   --path "${BUILD_DIRS[@]}" \
-  --build-dir "${BUILD_TMP}/@n_@w"
+  --build-dir "${BUILD_TMP}/@n_@w" \
+  $IDF_BUILD_APPS_EXTRA_ARGS
 
 ccache --show-stats 2>/dev/null || true
 

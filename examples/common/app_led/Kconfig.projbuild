@@ -24,6 +24,8 @@ menu "ESP RainMaker App LED Configuration"
 
         config APP_LED_WS2812_GPIO_NUM
             int "GPIO pin"
+            # ESP32-S31 pins follow the Korvo board; the function core board uses 60.
+            default 37 if IDF_TARGET_ESP32S31
             default 27 if IDF_TARGET_ESP32C5
             default 8 if IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32C6 || IDF_TARGET_ESP32H2
             default 48 if IDF_TARGET_ESP32S3

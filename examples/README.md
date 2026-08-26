@@ -20,10 +20,22 @@ useful for development and CI without a device.
 entry point, network/provisioning bring-up, LED, button, hold-to-reset — plus
 the shared CI sdkconfig variants.
 
+## Supported Targets
+
+| Target | Minimum ESP-IDF |
+| --- | --- |
+| ESP32, ESP32-S3, ESP32-C2, ESP32-C3, ESP32-C5, ESP32-C6 | **v6.0.2** |
+| ESP32-S31 | **v6.1** |
+
+Every target in the table is built in CI on each merge request. ESP-IDF classes
+ESP32-S31 as a *preview* target, so its build needs an extra flag — see
+[Build — ESP-IDF](#build--esp-idf).
+
 ## Prerequisites
 
-- **ESP-IDF**: an exported ESP-IDF environment, **v6.0.2 or later**
-  (`. $IDF_PATH/export.sh`); no extra install steps beyond ESP-IDF's own.
+- **ESP-IDF**: an exported ESP-IDF environment (`. $IDF_PATH/export.sh`) at the
+  version your target needs, listed in [Supported Targets](#supported-targets);
+  no extra install steps beyond ESP-IDF's own.
 - **POSIX**: CMake ≥ 3.16, GCC or Clang, Ninja or Make, and a Python virtual
   environment with `pip install -r posix_requirements.txt` run from the
   repository root (used by the Kconfig and mbedTLS scripts at configure time).
@@ -39,6 +51,12 @@ From the example directory:
 ```sh
 idf.py set-target <chip>
 idf.py build flash monitor
+```
+
+ESP32-S31 is a preview target, so `set-target` needs the `--preview` root option.
+
+```sh
+idf.py --preview set-target esp32s31
 ```
 
 Per-target overrides are merged from `sdkconfig.defaults.<target>` next to the

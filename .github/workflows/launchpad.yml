@@ -66,8 +66,10 @@ jobs:
       (github.event_name == 'workflow_dispatch' ||
        github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
     runs-on: ubuntu-latest
+    # Per-target image: a chip that only exists in a newer ESP-IDF overrides it via the
+    # matrix `include` below. Everything else builds with the pinned default.
     container:
-      image: espressif/idf:v6.0.2
+      image: ${{ matrix.idf_image || 'espressif/idf:v6.0.2' }}
     timeout-minutes: 180
     strategy:
       fail-fast: false
@@ -80,6 +82,14 @@ jobs:
         #     challenge-response based user-node mapping does not work well over it.
         #   - esp32h2 is Thread-only, and Thread is not yet validated with the phone apps.
         target: [esp32, esp32s3, esp32c2, esp32c3, esp32c5, esp32c6]
+        include:
+          # esp32s31 arrived in ESP-IDF v6.1 and is a PREVIEW target there, so it needs
+          # its own image plus --enable-preview-targets — the batch equivalent of
+          # `idf.py --preview set-target`. Without that flag idf-build-apps skips every
+          # app, because a preview target is absent from SUPPORTED_TARGETS.
+          - target: esp32s31
+            idf_image: espressif/idf:release-v6.1
+            build_apps_extra_args: --enable-preview-targets
     steps:
       - uses: actions/checkout@v7
         with:
@@ -99,6 +109,7 @@ jobs:
         shell: bash
         env:
           IDF_TARGET: ${{ matrix.target }}
+          IDF_BUILD_APPS_EXTRA_ARGS: ${{ matrix.build_apps_extra_args }}
           SITE_DIR: ${{ github.workspace }}/site
           BUILD_TMP: ${{ github.workspace }}/launchpad_build_tmp
           IDF_CCACHE_ENABLE: "1"

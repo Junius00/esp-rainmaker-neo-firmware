@@ -22,6 +22,11 @@
     ESP_MIN_APP_FREE_PCT: "0"
     # Substrings matched against "<target>/<app>_<config>" that skip the floors above.
     ESP_FREE_SPACE_EXEMPT: ""
+    # Extra idf-build-apps flags, set per matrix entry. A preview target (esp32s31) is
+    # absent from SUPPORTED_TARGETS, so idf-build-apps SKIPS every app for it unless
+    # --enable-preview-targets is passed — the batch equivalent of
+    # `idf.py --preview set-target`.
+    ESP_BUILD_APPS_EXTRA_ARGS: ""
     # ccache reuse is WITHIN a target, ACROSS apps: building all examples (and
     # their sdkconfig.ci.* variants) for one target compiles the shared ESP-IDF
     # core + managed components once; apps 2..N reuse those objects. Cross-TARGET
@@ -130,7 +135,8 @@
           "sdkconfig.ci.*=" "sdkconfig.defaults=default" \
           --target "$IDF_TARGET" \
           --path "${BUILD_DIRS[@]}" \
-          --build-dir "${ESP_TEMP_BUILD_DIR}/@n_@w"
+          --build-dir "${ESP_TEMP_BUILD_DIR}/@n_@w" \
+          $ESP_BUILD_APPS_EXTRA_ARGS
 
         # Collect a per-app size-components report (text) per built app; binaries
         # are discarded (too large to upload).
@@ -166,6 +172,11 @@ build_examples_esp_idf:
           - "esp32 esp32s3"              # Xtensa
           - "esp32c2 esp32c3 esp32c6"    # RISC-V (classic)
           - "esp32c5"                    # RISC-V (newer)
+      # esp32s31 is its own entry: ESP-IDF only gained the target in v6.1, and it is
+      # still a preview target there, so the group carries the extra flag.
+      - IDF_VERSION: ["release-v6.1"]
+        IDF_TARGET_GROUP: ["esp32s31"]
+        ESP_BUILD_APPS_EXTRA_ARGS: ["--enable-preview-targets"]
   rules:
     - !reference [.rules_build_gate, rules]
 
