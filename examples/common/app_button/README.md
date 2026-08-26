@@ -13,13 +13,13 @@ Set via `idf.py menuconfig` → *ESP RainMaker App Button Configuration*:
 
 | Option | Default | Purpose |
 |---|---|---|
-| `APP_BUTTON_GPIO_NUM` | BOOT button (`0`; `9` on C2/C3/C6/H2, `28` on C5) | Button input GPIO |
+| `APP_BUTTON_GPIO_NUM` | BOOT button (`0`; `9` on C2/C3/C6/H2, `28` on C5, `61` on S31) | Button input GPIO |
 | `APP_BUTTON_IS_ACTIVE_HIGH` | `n` | Button polarity |
 | `APP_BUTTON_SHORT_PRESS_TIME_MS` | `50` | Press time before the short-press action |
 | `APP_BUTTON_LONG_PRESS_TIME_MS` | `1000` | Hold time before the long-press action |
 
 If your board's button is on a different pin or wired active-high, change these or
-the button will do nothing.
+the button will do nothing. The ESP32-S31 default is the ESP32-S31 Korvo board.
 
 ## Reset functions
 

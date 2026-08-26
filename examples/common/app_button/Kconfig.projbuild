@@ -2,6 +2,8 @@ menu "ESP RainMaker App Button Configuration"
 
     config APP_BUTTON_GPIO_NUM
         int "GPIO pin"
+        # ESP32-S31 pins follow the Korvo board.
+        default 61 if IDF_TARGET_ESP32S31
         default 28 if IDF_TARGET_ESP32C5
         default 9 if IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32C6 || IDF_TARGET_ESP32C2 || IDF_TARGET_ESP32H2
         default 0
