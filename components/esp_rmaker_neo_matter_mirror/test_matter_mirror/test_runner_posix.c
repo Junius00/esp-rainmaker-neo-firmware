@@ -48,6 +48,8 @@ void test_mirror_xy_storm_coalescing(void);
 void test_mirror_color_mode(void);
 void test_mirror_scale_transform(void);
 void test_mirror_reported_capability(void);
+void test_mirror_golden_vectors_transforms(void);
+void test_mirror_golden_vectors_composites(void);
 
 int main(void)
 {
@@ -91,5 +93,7 @@ int main(void)
     RUN_TEST(test_mirror_color_mode);
     RUN_TEST(test_mirror_scale_transform);
     RUN_TEST(test_mirror_reported_capability);
+    RUN_TEST(test_mirror_golden_vectors_transforms);
+    RUN_TEST(test_mirror_golden_vectors_composites);
     return UNITY_END();
 }

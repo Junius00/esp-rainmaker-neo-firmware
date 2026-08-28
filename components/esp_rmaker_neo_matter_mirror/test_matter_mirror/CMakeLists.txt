@@ -2,7 +2,20 @@
 
 set(RMNG_MATTER_MIRROR_TEST_NAME rmng_matter_mirror_tests)
 
-add_executable(${RMNG_MATTER_MIRROR_TEST_NAME} test_mirror.c fake_port.c test_runner_posix.c)
+# The committed golden vectors, lowered to C tables for test_mirror_vectors.c. The JSON is a copied input
+# (mapping/SOURCE); only its C form is generated, and only for this test.
+add_custom_command(
+    OUTPUT ${RM_MIRROR_GEN_VECTORS_HDR}
+    COMMAND ${Python3_EXECUTABLE} "${RM_MIRROR_GEN_SCRIPT}" ${RM_MIRROR_LIB_ARGS} --vectors-in
+            "${RM_MIRROR_VECTORS_JSON}" --output-vectors-c "${RM_MIRROR_GEN_VECTORS_HDR}"
+    DEPENDS "${RM_MIRROR_VECTORS_JSON}" ${RM_MIRROR_GEN_DEPS}
+    COMMENT "Lowering the committed golden vectors to C"
+)
+
+add_executable(
+    ${RMNG_MATTER_MIRROR_TEST_NAME} test_mirror.c test_mirror_vectors.c fake_port.c test_runner_posix.c
+                                    ${RM_MIRROR_GEN_VECTORS_HDR}
+)
 target_include_directories(${RMNG_MATTER_MIRROR_TEST_NAME} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 target_link_libraries(${RMNG_MATTER_MIRROR_TEST_NAME} PRIVATE esp_rmaker_neo_matter_mirror unity::framework)
 

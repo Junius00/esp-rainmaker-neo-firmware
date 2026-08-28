@@ -20,6 +20,11 @@ set(RM_MIRROR_GEN_DEPS
     "${CMAKE_CURRENT_LIST_DIR}/scripts/mapping/vocabulary.py" "${CMAKE_CURRENT_LIST_DIR}/scripts/mapping/validate.py"
 )
 
+# Golden vectors: a copied input, not a build product. The C form the POSIX tests read is lowered from this file, so the
+# committed data stays the arbiter for every consumer.
+set(RM_MIRROR_VECTORS_JSON "${CMAKE_CURRENT_LIST_DIR}/mapping/vectors/rmng_matter_mapping.vectors.json")
+set(RM_MIRROR_GEN_VECTORS_HDR "${RM_MIRROR_GEN_DIR}/rm_mirror_vectors_gen.h")
+
 # The mapping library: every capability, composite and device-type rule the mirror knows. A product extends the
 # vocabulary with its own library files through CONFIG_ESP_RMAKER_NEO_MATTER_MIRROR_EXTRA_LIBS, merged after this one so
 # a clash names the shipped file as the original.

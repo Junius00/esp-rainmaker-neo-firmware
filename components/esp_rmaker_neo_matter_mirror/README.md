@@ -109,10 +109,10 @@ The steps, in order of increasing rarity:
    mapping table (~80 B/entry), is the footprint cost. Forgetting the sdkconfig entry
    fails the build; forgetting the cmake entry only makes the advisory below noisier.
 7. **Test on POSIX** (`test_matter_mirror/`): rule matching, lowering (endpoint type,
-   features, seeds, binding counts) and a sync round-trip against the fake port — no
-   hardware or esp-matter needed. The C emitters have their own suite:
-   `pytest scripts/test_gen_mapping_table.py`, run from this directory, and in CI as
-   `test_matter_mirror_mapping_gen`.
+   features, seeds, binding counts), a sync round-trip against the fake port and the
+   golden-vector parity check — no hardware or esp-matter needed. The C emitters have
+   their own suite: `pytest scripts/test_gen_mapping_table.py`, run from this directory,
+   and in CI as `test_matter_mirror_mapping_gen`.
 
 ## Mapping source
 
@@ -131,7 +131,8 @@ the JSON like a `.proto`: this component commits a copy of it, and generates its
 
 `scripts/sync_mapping.sh <mapping checkout>` refreshes the copies and stamps `SOURCE`;
 `--check` re-hashes them and fails on local drift (it runs in CI). Nothing generated is
-committed — the tables and the cluster cross-check are build products, so a build and its mapping cannot disagree.
+committed — the tables, the cluster cross-check and the vectors header are all build
+products, so a build and its mapping cannot disagree.
 
 The split of work follows the same line. The shared validator checks the mapping language:
 cross-entry references, rule ordering, arity, and the int32/uint8 limits every consumer
