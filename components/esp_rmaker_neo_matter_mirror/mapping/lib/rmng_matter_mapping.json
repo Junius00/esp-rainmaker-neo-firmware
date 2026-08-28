@@ -36,6 +36,7 @@
         "note": "StartUpOnOff: 0/1 assert Off/On at boot, 2 toggles the previous state. Skipped after an OTA restart, matching CHIP's own policy (a software update is not a power cycle)."
       },
       "defaults": {
+        "id": "Power",
         "data_type": "bool",
         "ui_type": "esp.ui.toggle",
         "properties": [
@@ -100,12 +101,19 @@
       },
       "deferred_persistence": true,
       "defaults": {
+        "id": "Brightness",
         "data_type": "int",
         "ui_type": "esp.ui.slider",
         "properties": [
           "read",
           "write"
-        ]
+        ],
+        "bounds": {
+          "min": 0,
+          "max": 100,
+          "step": 1
+        },
+        "bounds_note": "raising fallback when the device exposes no bounds attribute; lowering ignores it"
       }
     },
     {
@@ -166,12 +174,19 @@
       },
       "deferred_persistence": true,
       "defaults": {
+        "id": "CCT",
         "data_type": "int",
         "ui_type": "esp.ui.slider",
         "properties": [
           "read",
           "write"
-        ]
+        ],
+        "bounds": {
+          "min": 2700,
+          "max": 6500,
+          "step": 100
+        },
+        "bounds_note": "raising fallback when the device exposes no bounds attribute; lowering ignores it"
       }
     },
     {
@@ -255,12 +270,19 @@
       "rule_gated": true,
       "note": "rule_gated: lowers only for device rules that list it - keeps ColorControl off device types (e.g. 0x0101 Dimmable Light) whose Matter definition forbids it.",
       "defaults": {
+        "id": "Hue",
         "data_type": "int",
         "ui_type": "esp.ui.hue-slider",
         "properties": [
           "read",
           "write"
-        ]
+        ],
+        "bounds": {
+          "min": 0,
+          "max": 360,
+          "step": 1
+        },
+        "bounds_note": "raising fallback when the device exposes no bounds attribute; lowering ignores it"
       }
     },
     {
@@ -337,12 +359,19 @@
       },
       "rule_gated": true,
       "defaults": {
+        "id": "Saturation",
         "data_type": "int",
         "ui_type": "esp.ui.slider",
         "properties": [
           "read",
           "write"
-        ]
+        ],
+        "bounds": {
+          "min": 0,
+          "max": 100,
+          "step": 1
+        },
+        "bounds_note": "raising fallback when the device exposes no bounds attribute; lowering ignores it"
       }
     },
     {
@@ -381,12 +410,19 @@
       "rule_gated": true,
       "note": "RainMaker Neo HSV(1) <-> ColorMode CurrentHueAndSaturation(0); CCT(2) <-> ColorTemperatureMireds(2); inbound CurrentXAndCurrentY(1) folds to HSV via matter_aliases. No write_as: ColorMode has no setter command (CHIP switches it on color commands), so outbound uses the attribute-write fallback.",
       "defaults": {
+        "id": "Light Mode",
         "data_type": "int",
         "ui_type": "esp.ui.dropdown",
         "properties": [
           "read",
           "write"
-        ]
+        ],
+        "bounds": {
+          "min": 1,
+          "max": 2,
+          "step": 1
+        },
+        "bounds_note": "the enum members RainMaker defines (HSV=1, CCT=2); a derived dropdown needs the range the native firmware advertises"
       }
     },
     {
@@ -416,6 +452,7 @@
         ]
       },
       "defaults": {
+        "id": "Identify",
         "data_type": "int",
         "properties": [
           "write"
@@ -436,6 +473,7 @@
       },
       "note": "Name <-> BasicInformation.NodeLabel (endpoint 0), bidirectional, truncated to 32 chars, bound only when the node has exactly one Matter-mapped device. A multi-device node has no node-level name: its per-device names stay cloud-side, matched to endpoints through the read-only FixedLabel entry each mirrored endpoint serves (rmng.device = device id, the correlation key). UserLabel is deliberately not a name sink: any controller on the fabric replaces the whole list, so an entry that changes or disappears cannot be read as user intent, and its 16-char cap would clip the name it wrote back.",
       "defaults": {
+        "id": "Name",
         "data_type": "string",
         "properties": [
           "read",
@@ -466,6 +504,47 @@
       "conversion": {
         "type": "hsv_xy"
       },
+      "write_as": {
+        "commands": [
+          {
+            "command": "0x07",
+            "name": "MoveToColor",
+            "args": [
+              {
+                "field": 0,
+                "name": "ColorX",
+                "type": "u16",
+                "value": "$value[0]"
+              },
+              {
+                "field": 1,
+                "name": "ColorY",
+                "type": "u16",
+                "value": "$value[1]"
+              },
+              {
+                "field": 2,
+                "name": "TransitionTime",
+                "type": "u16",
+                "value": 0
+              },
+              {
+                "field": 3,
+                "name": "OptionsMask",
+                "type": "u8",
+                "value": 0
+              },
+              {
+                "field": 4,
+                "name": "OptionsOverride",
+                "type": "u8",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "write_as_note": "Controller-side command form: CurrentX/CurrentY are read-only, so a raising consumer drives color with MoveToColor; $value[i] is the i-th attribute value the conversion produced. The device (lowering) writes its own attributes and does not use this.",
       "deferred_persistence": true,
       "note": "CurrentX/CurrentY derived from hue+saturation (sRGB gamut, D65, gamma included; chromaticity only - brightness is LevelControl's). Lowered when all member params are bound on the endpoint; Extended Color Light (0x010D) mandates XY, which is why HS lights need this synthesis - Matter has no HS-only light device type. Inbound XY writes (MoveToColor lands as CurrentX/CurrentY updates) inject hue+saturation atomically (one write_params call). Outbound uses attribute writes: there is no single-value command for an X/Y pair in the write_as machinery, and reports do not disturb ColorMode."
     }
@@ -473,6 +552,10 @@
   "device_types": [
     {
       "device_type": "esp.device.lightbulb",
+      "defaults": {
+        "id": "Light",
+        "primary": "esp.param.power"
+      },
       "rules": [
         {
           "params": [
