@@ -88,7 +88,7 @@ control, and time-series flags are unchanged from
 Node config gains:
 
 ```json
-"data_model": "rmng",
+"data_model": "default",
 "model_version": "1.0"
 ```
 
@@ -165,12 +165,15 @@ runtime contexts from one source:
 
 | Consumer | Direction | Form |
 |---|---|---|
-| Firmware SDK | lowering (common → Matter tree) | compiled to C tables at build time |
-| RainMaker Neo Matter bridge | raising (discovered tree → derived config) | small C runtime engine |
-| Phone apps / dashboards | raising + value translation | TS/Kotlin/Swift library ports |
+| Firmware SDK (end devices) | lowering (common → Matter tree) | C tables generated per *profile* at build time by the firmware's own emitter, from a vendored copy of the mapping |
+| Headless controllers / RainMaker Neo Matter bridge | raising (discovered tree → derived config) | C runtime interpreter over the *runtime JSON* (cloud-deliverable) |
+| Phone apps / dashboards | raising + value translation | TS runtime interpreter over the same runtime JSON |
 
 Because a bridge-class device must run the raising engine, the rule language is
-deliberately small: match rules + enumerated transforms. No scripting.
+deliberately small: match rules + enumerated transforms. No scripting. The table
+lives in its own repository, `esp-rainmaker-neo-matter-mapping`, together with the
+generator/validator, JSON schemas, Python reference implementations of every primitive,
+and golden test vectors (§4.6).
 
 ### 4.1 Capability entry schema
 
@@ -356,6 +359,55 @@ per-endpoint name to the cloud until Matter offers a mechanism ecosystems consum
 
 ---
 
+### 4.6 Distribution, versioning and primitive negotiation
+
+**Distribution: copies, not dependencies.** The mapping repo is the canonical home of the
+*language*: the JSON library and profiles, the JSON Schemas, the validator (an importable
+Python package), the Python reference implementation of every primitive, the golden
+vectors, and the emitter of the consumer-neutral *runtime JSON*. Consumers vendor what they
+need — the library, the vectors, and a copy of the validator — stamped in `mapping/SOURCE`
+(source commit, `mapping_version`, per-file hashes) and guarded in CI by a drift check
+against those hashes. No submodules, no packages: consumers move at their own cadence.
+What each consumer *emits* from the copy is its own business, kept next to the code that
+consumes it: the firmware's C emitter mirrors the engine's table layout field by field, so
+it lives in the firmware repo and runs at build time (an ESP-IDF build always has Python);
+the phone SDK's build has no Python, so it commits the runtime JSON the shared emitter
+produced when the copy was refreshed. A headless controller reads that same runtime JSON at
+run time, delivered by the cloud.
+
+**Two consumption forms of one vocabulary.** Constrained end devices *lower* from tables
+generated per profile (a profile names the device types a product ships; unreferenced
+vocabulary is dropped, and the engine compiles only the primitives the tables reference).
+Raising consumers — the phone app and headless controllers — *interpret the runtime JSON*
+(the resolved mapping with Matter ids as integers, notes stripped, a content hash, and
+`requires`). Interpretation is what lets a controller support a device type it has never
+seen: new vocabulary reaches it as data.
+
+**Data vs code.** Everything device-type-specific is data — capabilities, rules, optional
+params, enum pairs/aliases, linear ranges, `bounds_from`, `defaults`, composite wiring,
+`write_as` payloads. Only the *enumerated primitives* are code: transform kinds
+(identity, linear, kelvin_mireds, enum_map, scale, string; planned string_enum_map) and
+composite conversions (hsv_xy; more with the thermostat wave). Adding a device type that
+reuses existing primitives needs no consumer code change; adding a primitive does, in
+every consumer.
+
+**Negotiation.** The runtime JSON's `requires` block names the primitives it uses. A
+consumer compares it with the set it implements before use: a cloud-delivered mapping a
+controller cannot fully interpret is detected up front, and the controller either keeps its
+previous mapping or degrades — capabilities needing an unsupported primitive are skipped
+(the cluster-level floor of §4.3 still yields params; §4.5's opaque blob covers the rest).
+
+**Determinism.** All primitives have a Python reference implementation in the mapping repo
+with C-exact semantics (truncating division, round-half-away-from-zero, int32 wrap), and
+the mapping repo emits golden vectors from it. Firmware and SDK assert bit-exact agreement
+with those vectors in their own test suites, so a device lowered by firmware and raised by
+any consumer — app or controller, at any mapping version — agrees on every value, and two
+reporters raising the same third-party device produce identical derived configs (§3.6).
+
+`mapping_version` is the contract version; the cloud must accept derived configs produced
+from any supported version, and derived configs are re-raised when the mapping updates
+(§3.5).
+
 ## 5. Worked example: CCT light
 
 ### 5.1 Native node config (RainMaker Neo firmware) — unchanged shape
@@ -364,7 +416,7 @@ per-endpoint name to the cloud until Matter offers a mechanism ecosystems consum
 {
   "node_id": "<node id>",
   "config": {
-    "data_model": "rmng", "model_version": "1.0",
+    "data_model": "default", "model_version": "1.0",
     "origin": { "type": "native" },
     "info": { "name": "CCT Bulb", "fw_version": "1.0", "model": "bulb-cct-1" },
     "devices": [{
@@ -416,7 +468,7 @@ The app commissions the bulb, walks its tree (endpoint 1, device type 0x010C, cl
 {
   "node_id": "<cloud-assigned id>",
   "config": {
-    "data_model": "rmng", "model_version": "1.0",
+    "data_model": "default", "model_version": "1.0",
     "origin": { "type": "derived", "source": "matter", "mapping_version": "1.0" },
     "info": { "name": "Kitchen Bulb", "model": "<from Basic Information cluster>" },
     "devices": [{
@@ -492,7 +544,7 @@ gap rather than creating migration work.
 Required changes:
 
 1. **Schema validation (new)**: node config is currently stored as-is with no
-   validation. Add validation for `data_model: "rmng"`, `model_version`, and the
+   validation. Add validation for `data_model: "default"`, `model_version`, and the
    standard-param normative rules. Remove the Matter endpoint structures from the
    config schema.
 2. **Node model flag** (`rmng` vs `rmng+matter`) in GET node responses — new field,
@@ -556,7 +608,9 @@ round-tripping.
 
 1. Reporter trust model and lifecycle for derived nodes (cloud).
 2. Headless controllers: policy for acting on cluster-level-matched (vs device-type-
-   matched) capabilities. Field reserved (§4.3); spec deferred.
+   matched) capabilities. Field reserved (§4.3); spec deferred. (The *mechanism* for
+   headless raising — runtime interpretation of the cloud-delivered runtime JSON with
+   primitive negotiation — is in §4.6; only the trust policy remains open.)
 3. Custom params + local latency: whether/when to reintroduce local-ctrl transport.
 4. Whether derived nodes surface Identify (curation call per §5.4).
 5. Thermostat/lock vocabulary stress test outcomes may feed back into §4 schema
