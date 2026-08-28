@@ -13,6 +13,13 @@ else ()
 endif ()
 set(RM_MIRROR_GEN_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/scripts/gen_mapping_table.py")
 
+# The generator plus the shared validator it imports (scripts/mapping/ is a copy of the canonical mapping repo; see
+# mapping/SOURCE). Any of them changing re-runs the generation.
+set(RM_MIRROR_GEN_DEPS
+    "${RM_MIRROR_GEN_SCRIPT}" "${CMAKE_CURRENT_LIST_DIR}/scripts/mapping/__init__.py"
+    "${CMAKE_CURRENT_LIST_DIR}/scripts/mapping/vocabulary.py" "${CMAKE_CURRENT_LIST_DIR}/scripts/mapping/validate.py"
+)
+
 # The mapping library: every capability, composite and device-type rule the mirror knows. A product extends the
 # vocabulary with its own library files through CONFIG_ESP_RMAKER_NEO_MATTER_MIRROR_EXTRA_LIBS, merged after this one so
 # a clash names the shipped file as the original.
@@ -56,11 +63,11 @@ if (NOT EXISTS "${RM_MIRROR_PROFILE_JSON}")
     )
 endif ()
 
-set(RM_MIRROR_MAPPING_ARGS "")
+set(RM_MIRROR_LIB_ARGS "")
 foreach (rm_mirror_lib IN LISTS RM_MIRROR_MAPPING_LIBS)
-    list(APPEND RM_MIRROR_MAPPING_ARGS --lib "${rm_mirror_lib}")
+    list(APPEND RM_MIRROR_LIB_ARGS --lib "${rm_mirror_lib}")
 endforeach ()
-list(APPEND RM_MIRROR_MAPPING_ARGS --profile "${RM_MIRROR_PROFILE_JSON}")
+set(RM_MIRROR_MAPPING_ARGS ${RM_MIRROR_LIB_ARGS} --profile "${RM_MIRROR_PROFILE_JSON}")
 
 # Platform-neutral engine (plain C; POSIX-unit-testable against a fake port), with the public helpers that need no port
 set(RMNG_MATTER_MIRROR_ENGINE_SRCS

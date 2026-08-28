@@ -11,7 +11,7 @@ a mirror, not an alternative data model.
   {power,brightness,cct} → 0x010C, {power,brightness} → 0x0101, {power} → 0x0100).
   `scripts/gen_mapping_table.py` emits compiled-in C tables at build time — adding a
   device type is a JSON-only change (given its clusters exist in the port's cluster
-  factory).
+  factory). The library is a copy of the canonical mapping repo; see "Mapping source".
 - **Profiles** (`mapping/profiles/`): a profile names the device types a product ships,
   and the generator emits the tables for that selection alone — library entries nothing
   kept references are dropped. Selected through the `Mapping profile` Kconfig choice
@@ -110,9 +110,41 @@ The steps, in order of increasing rarity:
    fails the build; forgetting the cmake entry only makes the advisory below noisier.
 7. **Test on POSIX** (`test_matter_mirror/`): rule matching, lowering (endpoint type,
    features, seeds, binding counts) and a sync round-trip against the fake port — no
-   hardware or esp-matter needed. The generator's library merging and profile resolution
-   have their own suite: `pytest scripts/test_gen_mapping_table.py`, run from this
-   directory, and in CI as `test_matter_mirror_mapping_gen`.
+   hardware or esp-matter needed. The C emitters have their own suite:
+   `pytest scripts/test_gen_mapping_table.py`, run from this directory, and in CI as
+   `test_matter_mirror_mapping_gen`.
+
+## Mapping source
+
+The mapping is not owned here. `esp-rainmaker-neo-matter-mapping` is canonical, and the
+firmware, the phone-app SDK and headless controllers all read the same vocabulary. Treat
+the JSON like a `.proto`: this component commits a copy of it, and generates its own C.
+
+| Path | |
+|---|---|
+| `mapping/lib/rmng_matter_mapping.json` | copied input: the vocabulary |
+| `mapping/vectors/rmng_matter_mapping.vectors.json` | copied input: golden vectors, emitted upstream from its Python reference transforms |
+| `scripts/mapping/` | copied input: the validator every consumer shares |
+| `mapping/SOURCE` | what was copied, from which commit, with a hash of each file |
+| `mapping/profiles/` | this component's own |
+| `scripts/gen_mapping_table.py` | this component's own: the C emitters |
+
+`scripts/sync_mapping.sh <mapping checkout>` refreshes the copies and stamps `SOURCE`;
+`--check` re-hashes them and fails on local drift (it runs in CI). Nothing generated is
+committed — the tables and the cluster cross-check are build products, so a build and its mapping cannot disagree.
+
+The split of work follows the same line. The shared validator checks the mapping language:
+cross-entry references, rule ordering, arity, and the int32/uint8 limits every consumer
+honours. This component adds what only it can know — that each value fits the field its
+tables give it (`_check_widths`, passed to `validate()` as an extra check), that every
+cluster the mapping needs has a factory in the port, and that the generated field widths
+still match `priv_include/rm_mirror_mapping.h`. The last two are enforced by the C
+compiler, through `rm_mirror_cluster_check_gen.h` and `RM_MIRROR_STATIC_ASSERT`.
+
+Adding a transform kind or a composite conversion is a code change here as well as
+upstream. Importing the generator asserts its C symbol tables cover the shared
+vocabulary, so a synced primitive this port has not implemented fails the sync, not the
+build.
 
 ## Profiles
 

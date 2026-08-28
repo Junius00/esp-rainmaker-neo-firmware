@@ -58,7 +58,7 @@ if (ESP_PLATFORM)
         COMMAND
             ${python} "${RM_MIRROR_GEN_SCRIPT}" ${RM_MIRROR_MAPPING_ARGS} --output-c "${RM_MIRROR_GEN_SRCS}" --output-h
             "${RM_MIRROR_GEN_HDR}" --output-check "${RM_MIRROR_GEN_CHECK_HDR}" ${RM_MIRROR_CLUSTER_CHECK_ARGS}
-        DEPENDS ${RM_MIRROR_MAPPING_LIBS} "${RM_MIRROR_PROFILE_JSON}" "${RM_MIRROR_GEN_SCRIPT}"
+        DEPENDS ${RM_MIRROR_MAPPING_LIBS} "${RM_MIRROR_PROFILE_JSON}" ${RM_MIRROR_GEN_DEPS}
         COMMENT "Generating Matter mirror mapping tables"
     )
 
@@ -72,7 +72,7 @@ else ()
             ${Python3_EXECUTABLE} "${RM_MIRROR_GEN_SCRIPT}" ${RM_MIRROR_MAPPING_ARGS} --output-c "${RM_MIRROR_GEN_SRCS}"
             --output-h "${RM_MIRROR_GEN_HDR}" --output-check "${RM_MIRROR_GEN_CHECK_HDR}"
             ${RM_MIRROR_CLUSTER_CHECK_ARGS}
-        DEPENDS ${RM_MIRROR_MAPPING_LIBS} "${RM_MIRROR_PROFILE_JSON}" "${RM_MIRROR_GEN_SCRIPT}"
+        DEPENDS ${RM_MIRROR_MAPPING_LIBS} "${RM_MIRROR_PROFILE_JSON}" ${RM_MIRROR_GEN_DEPS}
         COMMENT "Generating Matter mirror mapping tables"
     )
 

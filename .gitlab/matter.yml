@@ -92,7 +92,8 @@ build_examples_matter:
       - ${ESP_BUILD_TMP_BASE}/*/log/
     expire_in: 1 week
 
-# Host tests for the Matter mirror's mapping generator.
+# Host tests for the Matter mirror's C emitters, plus the guard that the copied mapping
+# (mapping/lib, mapping/vectors, scripts/mapping) still matches what mapping/SOURCE records.
 test_matter_mirror_mapping_gen:
   extends: .test_template
   image: python:3.11
@@ -125,6 +126,7 @@ test_matter_mirror_mapping_gen:
     # Run from the component dir: the suite resolves mapping/ and priv_include/ relative
     # to its own path, but junit-xml paths read better rooted at the project.
     - cd "$MIRROR_DIR"
+    - scripts/sync_mapping.sh --check
     - pytest -v scripts/test_gen_mapping_table.py --junitxml="$CI_PROJECT_DIR/mapping_gen_report.xml"
   artifacts:
     when: always
