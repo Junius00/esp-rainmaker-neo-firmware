@@ -33,6 +33,8 @@ set(COMPONENTS_DIR ${CMAKE_CURRENT_LIST_DIR}/../../../components)
 # Add esp_rmaker_neo first so it pulls in esp_rmaker_neo_common and osal.
 add_subdirectory(${COMPONENTS_DIR}/esp_rmaker_neo components/esp_rmaker_neo)
 add_subdirectory(${COMPONENTS_DIR}/esp_rmaker_neo_ota components/esp_rmaker_neo_ota)
+# Matter mirror engine (fake-port unit tests; no esp-matter on POSIX).
+add_subdirectory(${COMPONENTS_DIR}/esp_rmaker_neo_matter_mirror components/esp_rmaker_neo_matter_mirror)
 
 # Optional test-mqtt-common.
 add_subdirectory(${COMPONENTS_DIR}/osal/mqtt/test-mqtt-common components/osal/mqtt/test-mqtt-common)

@@ -1,0 +1,6 @@
+{
+  "profile_version": "1.0",
+  "name": "all",
+  "description": "Every device type the library defines. The default, and what the POSIX unit tests build against.",
+  "device_types": "*"
+}
