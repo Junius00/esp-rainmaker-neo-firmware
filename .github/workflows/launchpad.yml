@@ -63,7 +63,7 @@ jobs:
     # every fork burns a full set of heavy IDF build jobs on each push to its default
     # branch, only to fail at the Pages deploy it has no permission for.
     if: >-
-      github.repository_owner == 'espressif' &&
+      (github.repository_owner == 'espressif' || github.event_name == 'workflow_dispatch') &&
       (github.event_name == 'workflow_dispatch' ||
        github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
     runs-on: ubuntu-latest
@@ -133,7 +133,7 @@ jobs:
     # Same gate as `build` — see the note there. Workflow YAML has no anchors, so the
     # expression is repeated verbatim.
     if: >-
-      github.repository_owner == 'espressif' &&
+      (github.repository_owner == 'espressif' || github.event_name == 'workflow_dispatch') &&
       (github.event_name == 'workflow_dispatch' ||
        github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
     runs-on: ubuntu-latest
