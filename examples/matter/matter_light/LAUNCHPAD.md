@@ -24,15 +24,22 @@ cloud uses.
 
 ## Before you flash
 
+> **This firmware does not work with the public ESP RainMaker Neo deployment.**
+> The cloud credentials must be in the factory partition before commissioning,
+> and the public deployment has no way to put them there. Assisted claiming is
+> the only claiming this SDK provides, it runs over the BLE provisioning session,
+> and this firmware has no such session. Use a private or self-hosted deployment,
+> and register the nodes from its dashboard.
+
 **A factory partition is mandatory for this firmware.** Assisted claiming does
 not apply to a Matter node, so this example disables it. One `fctry` partition
 carries both stacks: the Matter credentials (DAC, PAI, CD, commissioning
 passcode and discriminator) and the RainMaker credentials.
 
-Obtain the factory partition binary from your deployment's dashboard, then flash
-it at this example's `fctry` offset before you flash the firmware. The offsets
-and step-by-step instructions are in the README shown on the Launchpad landing
-page.
+Obtain the factory partition binary from your private deployment's dashboard,
+then flash it at this example's `fctry` offset before you flash the firmware.
+The offsets and step-by-step instructions are in the README shown on the
+Launchpad landing page.
 
 > Commercial ecosystems validate the attestation chain. A device built with test
 > DAC/PAI/CD material is only accepted by a controller that allows test
