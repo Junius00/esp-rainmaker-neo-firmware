@@ -16,6 +16,12 @@
     # The other examples are dependency subsets of multi_device; change detection covers
     # their own code. Matched by basename, so a nested path like advanced/ota-custom works.
     ESP_ALWAYS_APPS: "multi_device ota-custom"
+    # Minimum headroom left in the smallest app partition, per built app+config.
+    # 100KB minimum, percentage-based not checked.
+    ESP_MIN_APP_FREE_BYTES: "102400"
+    ESP_MIN_APP_FREE_PCT: "0"
+    # Substrings matched against "<target>/<app>_<config>" that skip the floors above.
+    ESP_FREE_SPACE_EXEMPT: ""
     # ccache reuse is WITHIN a target, ACROSS apps: building all examples (and
     # their sdkconfig.ci.* variants) for one target compiles the shared ESP-IDF
     # core + managed components once; apps 2..N reuse those objects. Cross-TARGET
@@ -130,9 +136,17 @@
         # are discarded (too large to upload).
         for build_dir in "$ESP_TEMP_BUILD_DIR"/*; do
           collect_esp_build_artifacts "$build_dir" "$ESP_REPORTS_DIR" "$IDF_TARGET"
+          # Record every violation instead of aborting on the first, so one pipeline shows
+          # all the apps that need shrinking. Verdict is applied after the target loop.
+          check_esp_app_free_space "$build_dir" "$IDF_TARGET" \
+            "$ESP_REPORTS_DIR/app_free_space.csv" || FREE_SPACE_FAIL=1
         done
       done
       ccache --show-stats || true
+      if [ "${FREE_SPACE_FAIL:-0}" != "0" ]; then
+        echo "ERROR: app partition headroom below ESP_MIN_APP_FREE_BYTES/PCT (see 'free-space:' lines above)" >&2
+        exit 1
+      fi
   artifacts:
     paths:
       - ${ESP_REPORTS_BASE}/

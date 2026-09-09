@@ -119,6 +119,33 @@ before_script:
       fi
     }
   - |
+    # Gate one finished ESP-IDF build dir on free space in its app partition, appending a
+    # row to <csv>.
+    #
+    # ESP_MIN_APP_FREE_BYTES / ESP_MIN_APP_FREE_PCT are the floors (0 = that floor is off;
+    # both off => the check is skipped entirely). ESP_FREE_SPACE_EXEMPT is a space-separated
+    # list of substrings matched against "<target>/<app>_<config>", for builds that are
+    # knowingly tight (a small-flash target, a variant that pulls in extra features).
+    # Usage: check_esp_app_free_space <build_dir> <target> <csv>
+    function check_esp_app_free_space() {
+      local build_dir="$1"
+      local target="$2"
+      local csv="$3"
+      local min_bytes="${ESP_MIN_APP_FREE_BYTES:-0}"
+      local min_pct="${ESP_MIN_APP_FREE_PCT:-0}"
+      [ "$min_bytes" != "0" ] || [ "$min_pct" != "0" ] || return 0
+      [ -f "$build_dir/project_description.json" ] || return 0
+      local label="${target:+$target/}$(basename "$build_dir")"
+      local exempt
+      for exempt in $ESP_FREE_SPACE_EXEMPT; do
+        case "$label" in
+          *"$exempt"*) echo "free-space: $label exempt ($exempt)"; return 0 ;;
+        esac
+      done
+      python "$CI_PROJECT_DIR/tools/ci/check_app_free_space.py" "$build_dir" \
+        --min-free-bytes "$min_bytes" --min-free-pct "$min_pct" --label "$label" --csv "$csv"
+    }
+  - |
     # Resolve a project secure file numeric ID by exact filename (requires jq on PATH).
     # Uses CI_JOB_TOKEN; API base is CI_API_V4_URL or ${CI_SERVER_URL}/api/v4.
     # Usage: FILE_ID=$(secure_file_id_by_name "your-filename.pem")
