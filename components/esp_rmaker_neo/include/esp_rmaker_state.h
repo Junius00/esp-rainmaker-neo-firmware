@@ -52,6 +52,10 @@ typedef enum {
     ESP_RMAKER_REQ_SRC_LOCAL,
     /** Request initiated from firmware/console commands */
     ESP_RMAKER_REQ_SRC_FIRMWARE,
+    /** Request injected by a non-application component, e.g. a protocol
+     * reflector translating a command from another ecosystem.
+     */
+    ESP_RMAKER_REQ_SRC_EXTERNAL,
     /** This will always be the last value. Any value equal to or
      * greater than this should be considered invalid.
      */

@@ -8,6 +8,10 @@ Data Model
 ----------
 .. include-build-file:: inc/esp_rmaker_data_model.inc
 
+Data Model Introspection
+------------------------
+.. include-build-file:: inc/esp_rmaker_data_model_introspect.inc
+
 Parameter Values
 ----------------
 .. include-build-file:: inc/esp_rmaker_val.inc

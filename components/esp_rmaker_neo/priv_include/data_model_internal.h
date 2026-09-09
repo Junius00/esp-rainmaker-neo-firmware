@@ -127,6 +127,17 @@ esp_rmaker_error_t esp_rmaker_param_get_stored_value(_esp_rmaker_param_t *param,
  */
 esp_rmaker_error_t esp_rmaker_param_store_value(_esp_rmaker_param_t *param);
 
+/**
+ * @brief Notify registered param update observers of an applied value update.
+ *
+ * Called at the end of esp_rmaker_param_update() with no locks held.
+ * See esp_rmaker_data_model_introspect.h for the observer contract.
+ *
+ * @param[in] param Pointer to the parameter.
+ * @param[in] val The applied value (snapshot taken under the node lock).
+ */
+void esp_rmaker_param_update_observers_notify(const esp_rmaker_param_t *param, const esp_rmaker_param_val_t *val);
+
 /* Data model operations (state changes - update ID) **************************/
 
 /** Get the value of an update ID. Does not copy the value. */

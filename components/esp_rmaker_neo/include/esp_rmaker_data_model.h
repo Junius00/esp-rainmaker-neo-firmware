@@ -395,6 +395,16 @@ void *esp_rmaker_device_get_priv_data(const esp_rmaker_device_t *device);
 char *esp_rmaker_device_get_type(const esp_rmaker_device_t *device);
 
 /**
+ * @brief Check whether a device handle is a service
+ *
+ * @param[in] device Device handle.
+ *
+ * @return true if the handle was created via esp_rmaker_service_create().
+ * @return false otherwise, or if device is NULL.
+ */
+bool esp_rmaker_device_is_service(const esp_rmaker_device_t *device);
+
+/**
  * @brief Get parameter by type
  *
  * Get handle for a parameter based on the type.
@@ -533,6 +543,62 @@ char *esp_rmaker_param_get_type(const esp_rmaker_param_t *param);
  * @return NULL in case of failure.
  */
 esp_rmaker_param_val_t *esp_rmaker_param_get_val(esp_rmaker_param_t *param);
+
+/**
+ * @brief Get the bounds of a parameter
+ *
+ * Copies out the bounds set by esp_rmaker_param_add_bounds() or
+ * esp_rmaker_param_add_array_max_count().
+ *
+ * @note Bounds are part of the data model's construction-phase state: set them
+ * before esp_rmaker_start() and treat them as read-only after.
+ *
+ * @param[in] param Parameter handle.
+ * @param[out] min Minimum value. Can be NULL if not required.
+ * @param[out] max Maximum value. Can be NULL if not required.
+ * @param[out] step Step value. Can be NULL if not required.
+ *
+ * @return ESP_RMAKER_OK on success.
+ * @return ESP_RMAKER_NOT_FOUND if the parameter has no bounds.
+ * @return ESP_RMAKER_INVALID_ARG if param is NULL.
+ */
+esp_rmaker_error_t esp_rmaker_param_get_bounds(const esp_rmaker_param_t *param,
+        esp_rmaker_param_val_t *min, esp_rmaker_param_val_t *max, esp_rmaker_param_val_t *step);
+
+/**
+ * @brief Get the UI type of a parameter
+ *
+ * @note The returned string is owned by the parameter and is freed by the next
+ * esp_rmaker_param_add_ui_type() on it. The UI type is construction-phase state:
+ * set it before esp_rmaker_start() and treat it as read-only after, and the pointer
+ * stays valid for the life of the parameter.
+ *
+ * @param[in] param Parameter handle.
+ *
+ * @return UI type string on success.
+ * @return NULL if param is NULL, or if no UI type was set.
+ */
+const char *esp_rmaker_param_get_ui_type(const esp_rmaker_param_t *param);
+
+/**
+ * @brief Get the property flags of a parameter
+ *
+ * @param[in] param Parameter handle.
+ *
+ * @return Property flags, a logical OR of flags in @ref esp_rmaker_param_property_flags_t.
+ * @return 0 if param is NULL.
+ */
+uint8_t esp_rmaker_param_get_prop_flags(const esp_rmaker_param_t *param);
+
+/**
+ * @brief Get the device a parameter belongs to
+ *
+ * @param[in] param Parameter handle.
+ *
+ * @return Device handle on success.
+ * @return NULL if param is NULL, or if it has not been added to a device yet.
+ */
+const esp_rmaker_device_t *esp_rmaker_param_get_device(const esp_rmaker_param_t *param);
 
 /**
  * @brief Update a parameter

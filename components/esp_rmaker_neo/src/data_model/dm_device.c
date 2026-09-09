@@ -405,6 +405,15 @@ char *esp_rmaker_device_get_type(const esp_rmaker_device_t *device)
     return ((_esp_rmaker_device_t *)device)->type;
 }
 
+bool esp_rmaker_device_is_service(const esp_rmaker_device_t *device)
+{
+    if (!device) {
+        OSAL_LOGE(TAG, "Device handle cannot be NULL.");
+        return false;
+    }
+    return ((_esp_rmaker_device_t *)device)->is_service;
+}
+
 esp_rmaker_param_t *esp_rmaker_device_get_param_by_type(const esp_rmaker_device_t *device, const char *param_type)
 {
     if (!device || !param_type) {
