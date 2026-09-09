@@ -923,7 +923,7 @@ def _init_test_user(password: str, is_admin: bool = False):
         admin_user_pool_id=RM_CONFIG["AdminUserPoolId"],
         admin_client_id=RM_CONFIG["AdminUserPoolClientId"],
         end_user_pool_id=RM_CONFIG["UserPoolId"],
-        is_super_admin=is_admin,
+        is_admin=is_admin,
     )
     user.test_email = email
 
