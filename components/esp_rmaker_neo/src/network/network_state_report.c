@@ -1857,6 +1857,8 @@ const char *esp_rmaker_req_src_to_string(esp_rmaker_req_src_t src)
         return "Local";
     case ESP_RMAKER_REQ_SRC_FIRMWARE:
         return "Firmware";
+    case ESP_RMAKER_REQ_SRC_EXTERNAL:
+        return "External";
     default:
         return "UNKNOWN";
     }

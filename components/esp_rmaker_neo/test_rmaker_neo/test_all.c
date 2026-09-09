@@ -30,6 +30,10 @@ int test_rmng_all_tests_unity(void)
     RUN_TEST(test_device_model_delete_guard);
     RUN_TEST(test_device_model_attrs_callbacks_getters);
     RUN_TEST(test_param_model_getters);
+    RUN_TEST(test_introspect_enumeration);
+    RUN_TEST(test_introspect_metadata_getters);
+    RUN_TEST(test_introspect_param_update_observer);
+    RUN_TEST(test_introspect_device_write_params);
     RUN_TEST(test_param_model_create_bounds_and_update);
     RUN_TEST(test_param_model_same_value_update_skips_nvs);
     RUN_TEST(test_param_model_store_get_invalid_parent);

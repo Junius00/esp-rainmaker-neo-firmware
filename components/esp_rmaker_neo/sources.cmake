@@ -150,6 +150,7 @@ set(RMNG_DATA_MODEL_SRCS
     "${RMNG_DATA_MODEL_SRC_BASE_DIR}/dm_state_changes.c"
     "${RMNG_DATA_MODEL_SRC_BASE_DIR}/dm_timeseries.c"
     "${RMNG_DATA_MODEL_SRC_BASE_DIR}/dm_path.c"
+    "${RMNG_DATA_MODEL_SRC_BASE_DIR}/dm_introspect.c"
     # Standard types
     "${RMNG_DATA_MODEL_SRC_BASE_DIR}/standard_types/esp_rmaker_standard_params.c"
     "${RMNG_DATA_MODEL_SRC_BASE_DIR}/standard_types/esp_rmaker_standard_devices.c"

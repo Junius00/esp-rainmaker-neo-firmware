@@ -185,14 +185,16 @@ esp_rmaker_error_t esp_rmaker_param_add_ui_type(const esp_rmaker_param_t *param,
         return ESP_RMAKER_INVALID_ARG;
     }
     _esp_rmaker_param_t *_param = (_esp_rmaker_param_t *)param;
+    char *new_ui_type = OSAL_STRDUP_EXTRAM(ui_type);
+    if (!new_ui_type) {
+        OSAL_LOGE(TAG, "Failed to allocate memory for the UI type of param %s.", _param->id);
+        return ESP_RMAKER_NO_MEM;
+    }
     if (_param->ui_type) {
         free(_param->ui_type);
     }
-    if ((_param->ui_type = OSAL_STRDUP_EXTRAM(ui_type)) != NULL ) {
-        return ESP_RMAKER_OK;
-    } else {
-        return ESP_RMAKER_NO_MEM;
-    }
+    _param->ui_type = new_ui_type;
+    return ESP_RMAKER_OK;
 }
 
 esp_rmaker_error_t esp_rmaker_param_add_array_max_count(const esp_rmaker_param_t *param, int count)
@@ -244,6 +246,59 @@ esp_rmaker_param_val_t *esp_rmaker_param_get_val(esp_rmaker_param_t *param)
         return NULL;
     }
     return &((_esp_rmaker_param_t *)param)->val;
+}
+
+esp_rmaker_error_t esp_rmaker_param_get_bounds(const esp_rmaker_param_t *param,
+        esp_rmaker_param_val_t *min, esp_rmaker_param_val_t *max, esp_rmaker_param_val_t *step)
+{
+    _esp_rmaker_param_t *_param = (_esp_rmaker_param_t *)param;
+    if (!_param) {
+        OSAL_LOGE(TAG, "Param handle cannot be NULL.");
+        return ESP_RMAKER_INVALID_ARG;
+    }
+    if (!_param->bounds) {
+        return ESP_RMAKER_NOT_FOUND;
+    }
+    if (min) {
+        *min = _param->bounds->min;
+    }
+    if (max) {
+        *max = _param->bounds->max;
+    }
+    if (step) {
+        *step = _param->bounds->step;
+    }
+    return ESP_RMAKER_OK;
+}
+
+const char *esp_rmaker_param_get_ui_type(const esp_rmaker_param_t *param)
+{
+    _esp_rmaker_param_t *_param = (_esp_rmaker_param_t *)param;
+    if (!_param) {
+        OSAL_LOGE(TAG, "Param handle cannot be NULL.");
+        return NULL;
+    }
+    return _param->ui_type;
+}
+
+uint8_t esp_rmaker_param_get_prop_flags(const esp_rmaker_param_t *param)
+{
+    _esp_rmaker_param_t *_param = (_esp_rmaker_param_t *)param;
+    if (!_param) {
+        OSAL_LOGE(TAG, "Param handle cannot be NULL.");
+        return 0;
+    }
+    return _param->prop_flags;
+}
+
+const esp_rmaker_device_t *esp_rmaker_param_get_device(const esp_rmaker_param_t *param)
+{
+    _esp_rmaker_param_t *_param = (_esp_rmaker_param_t *)param;
+    if (!_param) {
+        OSAL_LOGE(TAG, "Param handle cannot be NULL.");
+        return NULL;
+    }
+    return (const esp_rmaker_device_t *)_param->parent;
 }
 
 esp_rmaker_error_t esp_rmaker_param_update(const esp_rmaker_param_t *param, esp_rmaker_param_val_t val)
@@ -334,6 +389,9 @@ esp_rmaker_error_t esp_rmaker_param_update(const esp_rmaker_param_t *param, esp_
         return ESP_RMAKER_INVALID_ARG;
     }
 
+    /* Value handed to the observers, taken from the caller's ``val``. */
+    const esp_rmaker_param_val_t applied_val = { .type = _param->val.type, .val = val.val };
+
     if (lnode) {
         esp_rmaker_node_unlock(lnode);
     }
@@ -342,6 +400,9 @@ esp_rmaker_error_t esp_rmaker_param_update(const esp_rmaker_param_t *param, esp_
     if (!value_unchanged && (_param->prop_flags & PROP_FLAG_PERSIST)) {
         esp_rmaker_param_store_value(_param);
     }
+
+    /* Notify observers with no locks held, before anything that can still fail */
+    esp_rmaker_param_update_observers_notify(param, &applied_val);
 
     /* Get the update ID for the parameter */
     esp_rmaker_state_update_id_t update_id = esp_rmaker_state_update_id_create((esp_rmaker_param_t *)_param);

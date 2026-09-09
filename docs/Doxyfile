@@ -40,6 +40,7 @@ INPUT = \
     $(PROJECT_PATH)/components/esp_rmaker_neo/include/esp_rmaker_host_ctrl_constants.h \
     $(PROJECT_PATH)/components/esp_rmaker_neo/include/esp_rmaker_local_config_targets.h \
     $(PROJECT_PATH)/components/esp_rmaker_neo/include/esp_rmaker_data_model.h \
+    $(PROJECT_PATH)/components/esp_rmaker_neo/include/esp_rmaker_data_model_introspect.h \
     $(PROJECT_PATH)/components/esp_rmaker_neo/include/esp_rmaker_val.h \
     $(PROJECT_PATH)/components/esp_rmaker_neo/include/esp_rmaker_standard_types.h \
     $(PROJECT_PATH)/components/esp_rmaker_neo/include/esp_rmaker_standard_params.h \

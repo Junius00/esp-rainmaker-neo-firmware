@@ -4,6 +4,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/../sources.cmake)
 set(RMNG_TEST_SRCS
     # All test sources
     "tests_src/test_node_model.c"
+    "tests_src/test_introspect.c"
     "tests_src/test_timeseries.c"
     "tests_src/chal_resp/test_pb_c.c"
     "tests_src/local_ctrl/test_local_ctrl_endpoints.c"

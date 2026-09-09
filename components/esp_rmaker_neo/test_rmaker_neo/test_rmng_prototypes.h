@@ -86,6 +86,26 @@ void test_device_model_attrs_callbacks_getters(void);
 void test_param_model_getters(void);
 
 /**
+ * @brief Test data model introspection: device/param enumeration.
+ */
+void test_introspect_enumeration(void);
+
+/**
+ * @brief Test data model introspection: param metadata getters.
+ */
+void test_introspect_metadata_getters(void);
+
+/**
+ * @brief Test the param update observer registration and notification.
+ */
+void test_introspect_param_update_observer(void);
+
+/**
+ * @brief Test programmatic param write injection to device callbacks.
+ */
+void test_introspect_device_write_params(void);
+
+/**
  * @brief Test param model create/bounds/update.
  */
 void test_param_model_create_bounds_and_update(void);
