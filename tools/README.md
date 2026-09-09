@@ -2,7 +2,8 @@
 
 Command-line tools plus [`common/`](./common/) — the shared library they and the
 [integration test suite](../test/README.md) both import. [`docker/`](./docker/)
-holds container definitions used by CI, not tools.
+holds container definitions used by CI and [`ci/`](./ci/) holds scripts the CI jobs
+call, neither of which are tools.
 
 ## Tools
 

@@ -1,6 +1,4 @@
-# This file was generated using idf.py save-defconfig. It can be edited manually.
-# Espressif IoT Development Framework (ESP-IDF) 5.5.0 Project Minimal Configuration
-#
+# Baseline config for the light example, applied to every target.
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 
@@ -12,7 +10,33 @@ CONFIG_BT_ENABLED=y
 CONFIG_BT_NIMBLE_ENABLED=y
 CONFIG_APP_NETWORK_PROV_TRANSPORT_BLE=y
 CONFIG_APP_NETWORK_PROV_COMPACT_QR=y
+# Peripheral-only, legacy advertising; Wi-Fi needs no SoftAP.
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
+CONFIG_BT_NIMBLE_50_FEATURE_SUPPORT=n
+CONFIG_BT_NIMBLE_LOG_LEVEL_WARNING=y
+CONFIG_ESP_WIFI_SOFTAP_SUPPORT=n
 
 # Optimize build for size for all targets.
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
+
+## Trim flash size
+# Common CA roots only, not the full Mozilla bundle.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y
+# Log v2 drops the per-callsite format glue.
+CONFIG_LOG_VERSION_2=y
+# mbedTLS error strings and self-tests are development-only.
+CONFIG_MBEDTLS_ERROR_STRINGS=n
+CONFIG_MBEDTLS_SELF_TEST=n
+# Nothing here terminates TLS: MQTT is the client side, local HTTP is plain.
+CONFIG_MBEDTLS_TLS_CLIENT_ONLY=y
+# AWS IoT uses P-256, BLE provisioning uses Curve25519; drop the rest.
+CONFIG_MBEDTLS_ECP_DP_SECP384R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_SECP521R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_SECP256K1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_BP256R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_BP384R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_BP512R1_ENABLED=n
+# No WPA2-Enterprise.
+CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=n
