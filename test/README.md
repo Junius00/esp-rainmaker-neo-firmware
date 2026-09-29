@@ -27,9 +27,13 @@ pointing at a backend checkout, plus that deployment's credentials.
    constraints resolving predictably:
 
    ```bash
-   pip install -r "${RMNG_BACKEND_DIR}/requirements.txt"
+   (cd "${RMNG_BACKEND_DIR}" && pip install -r requirements.txt)
    pip install -r test/requirements.txt
    ```
+
+   Install the backend's requirements from inside its checkout: they include
+   editable installs, which pip resolves relative to the current directory
+   rather than to the requirements file.
 
    `test/requirements.txt` pulls in [`tools/requirements.txt`](../tools/requirements.txt)
    (the shared [`tools/common/`](../tools/common/) library) and

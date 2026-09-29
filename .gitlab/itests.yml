@@ -38,7 +38,8 @@ variables:
       # Setup Python environment
       python3 -m venv "${CI_PROJECT_DIR}/.venv"
       source "${CI_PROJECT_DIR}/.venv/bin/activate"
-      pip install -r "${RMNG_BACKEND_DIR}/requirements.txt"
+      # Editable installs in requirements.txt use paths relative to the backend root.
+      (cd "${RMNG_BACKEND_DIR}" && pip install -r requirements.txt)
       pip install -r "${CI_PROJECT_DIR}/test/requirements.txt"
 
       # Download credentials
