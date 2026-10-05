@@ -23,7 +23,8 @@
 #include "osal_sysctrl.h"
 #include "osal_log.h"
 #include "osal_scheduler.h"
-#include "osal_mem_alloc.h"
+#include "osal_task.h"
+#include "osal_queue.h"
 
 /* NVS common includes */
 #include "osal_storage.h"
@@ -48,15 +49,27 @@
 /* Max time to wait for the node_reset notification's QoS1 publish to flush before wiping. */
 #define SYSTEM_CTRL_NODE_RESET_NOTIFY_TIMEOUT_MS 3000
 
+/* Worker task that runs delayed resets outside the scheduler's context. */
+#define SYSTEM_CTRL_RESET_TASK_STACK    CONFIG_RMAKER_WORK_QUEUE_TASK_STACK_SIZE
+#define SYSTEM_CTRL_RESET_TASK_PRIORITY CONFIG_RMAKER_WORK_QUEUE_TASK_PRIORITY
+
+/* Max number of pending delayed resets. */
+#define SYSTEM_CTRL_RESET_QUEUE_LENGTH 3
+
 /* Max number of registered factory reset participants. */
 #define SYSTEM_CTRL_FACTORY_RESET_PARTICIPANT_MAX_COUNT 4
 
 /* Types **************************************************************/
 
+typedef struct __system_ctrl_reset_data __system_ctrl_reset_data_t;
+
+/* Reset routine that the worker task runs. */
+typedef esp_rmaker_error_t (*__system_ctrl_reset_run_fn_t)(const __system_ctrl_reset_data_t *reset_data);
+
 /**
  * @brief System control private data.
  */
-typedef struct {
+struct __system_ctrl_reset_data {
     /** The timeout in seconds to reboot the system after resetting the network credentials.
      * 0 means reboot immediately; a negative value means do not reboot.
      */
@@ -64,7 +77,13 @@ typedef struct {
 
     /** The function to reset the network credentials. */
     esp_rmaker_system_ctrl_network_reset_fn_t network_reset_fn;
-} __system_ctrl_reset_data_t;
+
+    /** The reset routine that the worker task runs. */
+    __system_ctrl_reset_run_fn_t run;
+
+    /** The delay in seconds before the worker task runs the reset. */
+    uint8_t delay_s;
+};
 
 /* Global variables **************************************************************/
 
@@ -77,6 +96,9 @@ static esp_rmaker_system_ctrl_network_reset_fn_t g_network_reset_fn = NULL;
 /* Registered factory reset participants, in registration order. */
 static esp_rmaker_system_ctrl_factory_reset_participant_t g_factory_reset_participants[SYSTEM_CTRL_FACTORY_RESET_PARTICIPANT_MAX_COUNT];
 static uint8_t g_factory_reset_participant_count = 0;
+
+/* Delayed resets, posted by value to the worker task. */
+static osal_queue_handle_t g_reset_queue = NULL;
 
 /* Set while a factory reset is running, so a reset a participant's own wipe triggers is a no-op. */
 static bool g_factory_reset_in_progress = false;
@@ -94,12 +116,11 @@ static bool g_factory_reset_in_progress = false;
 static esp_rmaker_error_t __schedule_task(osal_scheduler_task_handle_t *handle, uint8_t timeout_s, osal_scheduler_task_t task, void *arg);
 
 /**
- * @brief Create reset data. For use in scheduler tasks.
- * @param[in] reset_reboot_s The timeout in seconds to reboot the system after resetting the network credentials.
- * @param[in] network_reset_fn Function to reset the network credentials.
- * @return The reset data.
+ * @brief Post a delayed reset by value to the worker task.
+ * @param[in] reset_data The reset data, including the delay.
+ * @return ESP_RMAKER_OK on success, otherwise error code.
  */
-static __system_ctrl_reset_data_t *__create_reset_data(int8_t reset_reboot_s, esp_rmaker_system_ctrl_network_reset_fn_t network_reset_fn);
+static esp_rmaker_error_t __queue_reset(const __system_ctrl_reset_data_t *reset_data);
 
 /**
  * @brief Reboot the system (scheduler task).
@@ -108,30 +129,24 @@ static __system_ctrl_reset_data_t *__create_reset_data(int8_t reset_reboot_s, es
 static void __system_ctrl_reboot_task(void *arg);
 
 /**
- * @brief Reset the network credentials (scheduler task).
- * @param[in] arg Reset data (::__system_ctrl_reset_data_t), freed by the task.
+ * @brief Wait out each queued reset's delay, then run it (worker task, never returns).
+ * @param[in] arg Unused.
  */
-static void __system_ctrl_network_reset_task(void *arg);
-
-/**
- * @brief Factory reset the system (scheduler task).
- * @param[in] arg Reset data (::__system_ctrl_reset_data_t), freed by the task.
- */
-static void __system_ctrl_factory_reset_task(void *arg);
+static void __system_ctrl_reset_worker_task(void *arg);
 
 /**
  * @brief Reset the network credentials.
  * @param[in] reset_data Reset data carrying the reboot timeout and the reset function.
  * @return ESP_RMAKER_OK on success, otherwise error code.
  */
-static esp_rmaker_error_t __system_ctrl_network_reset(__system_ctrl_reset_data_t *reset_data);
+static esp_rmaker_error_t __system_ctrl_network_reset(const __system_ctrl_reset_data_t *reset_data);
 
 /**
  * @brief Factory reset the system.
  * @param[in] reset_data Reset data carrying the reboot timeout and the reset function.
  * @return ESP_RMAKER_OK on success, otherwise error code.
  */
-static esp_rmaker_error_t __system_ctrl_factory_reset(__system_ctrl_reset_data_t *reset_data);
+static esp_rmaker_error_t __system_ctrl_factory_reset(const __system_ctrl_reset_data_t *reset_data);
 
 /**
  * @brief Run one participant's wipe, logging a failure.
@@ -198,15 +213,18 @@ static esp_rmaker_error_t __schedule_task(osal_scheduler_task_handle_t *handle, 
     return err == OSAL_ERR_OK ? ESP_RMAKER_OK : ESP_RMAKER_FAIL;
 }
 
-static __system_ctrl_reset_data_t *__create_reset_data(int8_t reset_reboot_s, esp_rmaker_system_ctrl_network_reset_fn_t network_reset_fn)
+static esp_rmaker_error_t __queue_reset(const __system_ctrl_reset_data_t *reset_data)
 {
-    __system_ctrl_reset_data_t *reset_data = (__system_ctrl_reset_data_t *)OSAL_CALLOC_EXTRAM(1, sizeof(__system_ctrl_reset_data_t));
-    if (reset_data == NULL) {
-        return NULL;
+    if (g_reset_queue == NULL) {
+        OSAL_LOGE(TAG, "Delayed reset needs esp_rmaker_init() first");
+        return ESP_RMAKER_INVALID_STATE;
     }
-    reset_data->reset_reboot_s = reset_reboot_s;
-    reset_data->network_reset_fn = network_reset_fn;
-    return reset_data;
+
+    if (osal_queue_send(g_reset_queue, reset_data, 0) != OSAL_ERR_OK) {
+        OSAL_LOGE(TAG, "Reset queue full; rejecting the reset");
+        return ESP_RMAKER_INVALID_STATE;
+    }
+    return ESP_RMAKER_OK;
 }
 
 static void __system_ctrl_reboot_task(void *arg)
@@ -215,21 +233,19 @@ static void __system_ctrl_reboot_task(void *arg)
     (void) osal_sysctrl_reboot();
 }
 
-static void __system_ctrl_network_reset_task(void *arg)
+static void __system_ctrl_reset_worker_task(void *arg)
 {
-    __system_ctrl_reset_data_t *reset_data = (__system_ctrl_reset_data_t *) arg;
-    (void) __system_ctrl_network_reset(reset_data);
-    free(reset_data);
+    (void) arg;
+    __system_ctrl_reset_data_t reset_data;
+    while (true) {
+        if (osal_queue_receive(g_reset_queue, &reset_data, OSAL_MAX_DELAY) == OSAL_ERR_OK) {
+            osal_task_delay(osal_ticks_from_ms((uint32_t) reset_data.delay_s * 1000));
+            (void) reset_data.run(&reset_data);
+        }
+    }
 }
 
-static void __system_ctrl_factory_reset_task(void *arg)
-{
-    __system_ctrl_reset_data_t *reset_data = (__system_ctrl_reset_data_t *) arg;
-    (void) __system_ctrl_factory_reset(reset_data);
-    free(reset_data);
-}
-
-static esp_rmaker_error_t __system_ctrl_network_reset(__system_ctrl_reset_data_t *reset_data)
+static esp_rmaker_error_t __system_ctrl_network_reset(const __system_ctrl_reset_data_t *reset_data)
 {
     OSAL_LOGW(TAG, "Executing network reset");
     esp_rmaker_error_t err = reset_data->network_reset_fn();
@@ -357,7 +373,7 @@ static esp_rmaker_error_t __factory_reset_run(esp_rmaker_system_ctrl_factory_res
     return first_err;
 }
 
-static esp_rmaker_error_t __system_ctrl_factory_reset(__system_ctrl_reset_data_t *reset_data)
+static esp_rmaker_error_t __system_ctrl_factory_reset(const __system_ctrl_reset_data_t *reset_data)
 {
     return __factory_reset_run(NULL, reset_data->network_reset_fn, reset_data->reset_reboot_s);
 }
@@ -443,7 +459,7 @@ esp_rmaker_error_t esp_rmaker_system_ctrl_clear_data_namespaces(void)
     return first_err;
 }
 
-static esp_rmaker_error_t __system_ctrl_data_reset(__system_ctrl_reset_data_t *reset_data)
+static esp_rmaker_error_t __system_ctrl_data_reset(const __system_ctrl_reset_data_t *reset_data)
 {
     OSAL_LOGW(TAG, "Executing data reset");
     esp_rmaker_error_t err = esp_rmaker_system_ctrl_clear_data_namespaces();
@@ -461,13 +477,6 @@ static esp_rmaker_error_t __system_ctrl_data_reset(__system_ctrl_reset_data_t *r
     return err;
 }
 
-static void __system_ctrl_data_reset_task(void *arg)
-{
-    __system_ctrl_reset_data_t *reset_data = (__system_ctrl_reset_data_t *) arg;
-    (void) __system_ctrl_data_reset(reset_data);
-    free(reset_data);
-}
-
 static esp_rmaker_error_t __node_reset_payload_fn(json_gen_str_t *jptr, void *data, bool is_sizing)
 {
     (void) data;
@@ -479,6 +488,30 @@ static esp_rmaker_error_t __node_reset_payload_fn(json_gen_str_t *jptr, void *da
 }
 
 /* Public function definitions **********************************************************/
+
+esp_rmaker_error_t esp_rmaker_system_ctrl_init(void)
+{
+    if (g_reset_queue != NULL) {
+        return ESP_RMAKER_OK;
+    }
+
+    osal_queue_handle_t queue = osal_queue_create(SYSTEM_CTRL_RESET_QUEUE_LENGTH, sizeof(__system_ctrl_reset_data_t));
+    if (queue == NULL) {
+        OSAL_LOGE(TAG, "Failed to create the reset queue");
+        return ESP_RMAKER_NO_MEM;
+    }
+
+    /* Publish before the task starts: it reads the queue at once. */
+    g_reset_queue = queue;
+    if (osal_task_create(__system_ctrl_reset_worker_task, "rmng_sys_reset", SYSTEM_CTRL_RESET_TASK_STACK,
+                         NULL, SYSTEM_CTRL_RESET_TASK_PRIORITY, NULL) != OSAL_ERR_OK) {
+        OSAL_LOGE(TAG, "Failed to create the reset task");
+        g_reset_queue = NULL;
+        osal_queue_delete(queue);
+        return ESP_RMAKER_NO_MEM;
+    }
+    return ESP_RMAKER_OK;
+}
 
 esp_rmaker_error_t esp_rmaker_system_ctrl_reboot(uint8_t timeout_s)
 {
@@ -495,49 +528,47 @@ esp_rmaker_error_t esp_rmaker_system_ctrl_reboot(uint8_t timeout_s)
 
 esp_rmaker_error_t esp_rmaker_system_ctrl_network_reset(uint8_t reset_s, int8_t reset_reboot_s, esp_rmaker_system_ctrl_network_reset_fn_t network_reset_fn)
 {
-    static osal_scheduler_task_handle_t network_reset_task_handle = NULL;
     esp_rmaker_system_ctrl_network_reset_fn_t resolved_fn = network_reset_fn ? network_reset_fn : g_network_reset_fn;
     if (resolved_fn == NULL) {
         OSAL_LOGE(TAG, "No network reset function available (argument and registered fn are both NULL)");
         return ESP_RMAKER_INVALID_ARG;
     }
-    __system_ctrl_reset_data_t *reset_data = __create_reset_data(reset_reboot_s, resolved_fn);
-    if (reset_data == NULL) {
-        return ESP_RMAKER_NO_MEM;
-    }
+    const __system_ctrl_reset_data_t reset_data = {
+        .reset_reboot_s = reset_reboot_s,
+        .network_reset_fn = resolved_fn,
+        .run = __system_ctrl_network_reset,
+        .delay_s = reset_s,
+    };
 
     osal_event_post(RMAKER_COMMON_EVENT, RMAKER_EVENT_NETWORK_RESET, NULL, 0, OSAL_MAX_DELAY);
     if (reset_s > 0) {
-        OSAL_LOGI(TAG, "Scheduling network reset task for %d s", reset_s);
-        return __schedule_task(&network_reset_task_handle, reset_s, __system_ctrl_network_reset_task, reset_data);
+        OSAL_LOGI(TAG, "Queueing network reset for %d s", reset_s);
+        return __queue_reset(&reset_data);
     } else {
-        esp_rmaker_error_t err = __system_ctrl_network_reset(reset_data);
-        free(reset_data);
-        return err;
+        return __system_ctrl_network_reset(&reset_data);
     }
 }
 
 esp_rmaker_error_t esp_rmaker_system_ctrl_factory_reset(uint8_t reset_s, int8_t reset_reboot_s, esp_rmaker_system_ctrl_network_reset_fn_t network_reset_fn)
 {
-    static osal_scheduler_task_handle_t factory_reset_task_handle = NULL;
     esp_rmaker_system_ctrl_network_reset_fn_t resolved_fn = network_reset_fn ? network_reset_fn : g_network_reset_fn;
     if (resolved_fn == NULL) {
         OSAL_LOGE(TAG, "No network reset function available (argument and registered fn are both NULL)");
         return ESP_RMAKER_INVALID_ARG;
     }
-    __system_ctrl_reset_data_t *reset_data = __create_reset_data(reset_reboot_s, resolved_fn);
-    if (reset_data == NULL) {
-        return ESP_RMAKER_NO_MEM;
-    }
+    const __system_ctrl_reset_data_t reset_data = {
+        .reset_reboot_s = reset_reboot_s,
+        .network_reset_fn = resolved_fn,
+        .run = __system_ctrl_factory_reset,
+        .delay_s = reset_s,
+    };
 
     osal_event_post(RMAKER_COMMON_EVENT, RMAKER_EVENT_FACTORY_RESET, NULL, 0, OSAL_MAX_DELAY);
     if (reset_s > 0) {
-        OSAL_LOGI(TAG, "Scheduling factory reset task for %d s", reset_s);
-        return __schedule_task(&factory_reset_task_handle, reset_s, __system_ctrl_factory_reset_task, reset_data);
+        OSAL_LOGI(TAG, "Queueing factory reset for %d s", reset_s);
+        return __queue_reset(&reset_data);
     } else {
-        esp_rmaker_error_t err = __system_ctrl_factory_reset(reset_data);
-        free(reset_data);
-        return err;
+        return __system_ctrl_factory_reset(&reset_data);
     }
 }
 
@@ -606,18 +637,17 @@ esp_rmaker_error_t esp_rmaker_system_ctrl_factory_reset_participant_unregister(e
 
 esp_rmaker_error_t esp_rmaker_system_ctrl_data_reset(uint8_t reset_s, int8_t reset_reboot_s)
 {
-    static osal_scheduler_task_handle_t data_reset_task_handle = NULL;
-    __system_ctrl_reset_data_t *reset_data = __create_reset_data(reset_reboot_s, NULL);
-    if (reset_data == NULL) {
-        return ESP_RMAKER_NO_MEM;
-    }
+    const __system_ctrl_reset_data_t reset_data = {
+        .reset_reboot_s = reset_reboot_s,
+        .network_reset_fn = NULL,
+        .run = __system_ctrl_data_reset,
+        .delay_s = reset_s,
+    };
 
     if (reset_s > 0) {
-        OSAL_LOGI(TAG, "Scheduling data reset task for %d s", reset_s);
-        return __schedule_task(&data_reset_task_handle, reset_s, __system_ctrl_data_reset_task, reset_data);
+        OSAL_LOGI(TAG, "Queueing data reset for %d s", reset_s);
+        return __queue_reset(&reset_data);
     } else {
-        esp_rmaker_error_t err = __system_ctrl_data_reset(reset_data);
-        free(reset_data);
-        return err;
+        return __system_ctrl_data_reset(&reset_data);
     }
 }

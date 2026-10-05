@@ -35,6 +35,7 @@
 
 /* Core includes */
 #include "core_internal.h"
+#include "system_ctrl_internal.h"
 
 /* Platform common headers */
 #include "osal_log.h"
@@ -550,6 +551,14 @@ static esp_rmaker_error_t esp_rmaker_init(const esp_rmaker_config_t *config)
     if (scheduler_err != OSAL_ERR_OK) {
         OSAL_LOGE(TAG, "Failed to initialize scheduler");
         ret = ESP_RMAKER_FAIL;
+        goto fail;
+    }
+
+    /* Initialise system control */
+    OSAL_LOGD(TAG, "Initializing system control...");
+    ret = esp_rmaker_system_ctrl_init();
+    if (ret != ESP_RMAKER_OK) {
+        OSAL_LOGE(TAG, "Failed to initialize system control");
         goto fail;
     }
 

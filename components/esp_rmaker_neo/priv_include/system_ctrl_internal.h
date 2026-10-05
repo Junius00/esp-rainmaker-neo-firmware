@@ -20,6 +20,12 @@ extern "C" {
 #endif
 
 /**
+ * @brief Create the worker task and queue that run delayed resets. Safe to call more than once.
+ * @return ESP_RMAKER_OK on success, ESP_RMAKER_NO_MEM if the task or the queue cannot be created.
+ */
+esp_rmaker_error_t esp_rmaker_system_ctrl_init(void);
+
+/**
  * @brief Clear the RainMaker Neo-owned data NVS namespaces.
  *
  * Erases only the RainMaker Neo data namespaces without touching the rest of the NVS partition (e.g. network
