@@ -114,6 +114,20 @@ bool osal_mqtt_subscription_add( const char *pcTopicFilterString,
                                  osal_mqtt_QoS_t qos,
                                  void *priv_data )
 {
+    return osal_mqtt_subscription_add_ex( pcTopicFilterString, usTopicFilterLength, channel, callback, qos, priv_data, NULL );
+}
+
+bool osal_mqtt_subscription_add_ex( const char *pcTopicFilterString,
+                                    uint16_t usTopicFilterLength,
+                                    osal_mqtt_event_loop_channel_t *channel,
+                                    osal_mqtt_subscribe_cb_t callback,
+                                    osal_mqtt_QoS_t qos,
+                                    void *priv_data,
+                                    bool *p_added )
+{
+    if ( p_added != NULL ) {
+        *p_added = false;
+    }
     int32_t lIndex = 0;
     size_t xAvailableIndex = OSAL_MQTT_MAX_SUBSCRIPTIONS;
     bool xReturnStatus = false;
@@ -160,6 +174,9 @@ bool osal_mqtt_subscription_add( const char *pcTopicFilterString,
             pxSubscriptionList[ xAvailableIndex ].qos = qos;
             pxSubscriptionList[ xAvailableIndex ].priv_data = priv_data;
             xReturnStatus = true;
+            if ( p_added != NULL ) {
+                *p_added = true;
+            }
             subscription_count++;
             OSAL_LOGD(TAG, "Added to subscription list for topic: %s, count: %d/%d", pcTopicFilterString, subscription_count, OSAL_MQTT_MAX_SUBSCRIPTIONS);
         }
@@ -205,6 +222,34 @@ void osal_mqtt_subscription_remove( const char *pcTopicFilterString,
         /* Release the subscription list mutex. */
         unlock_subscription_list();
     }
+}
+
+void osal_mqtt_subscription_remove_entry( const char *pcTopicFilterString,
+        uint16_t usTopicFilterLength,
+        osal_mqtt_subscribe_cb_t callback,
+        void *priv_data )
+{
+    if ( ( pcTopicFilterString == NULL ) || ( usTopicFilterLength == 0U ) ) {
+        return;
+    }
+    if ( !lock_subscription_list() ) {
+        return;
+    }
+
+    for ( uint32_t ulIndex = 0U; ulIndex < OSAL_MQTT_MAX_SUBSCRIPTIONS; ulIndex++ ) {
+        osal_mqtt_subscription_element_t *pxElement = &pxSubscriptionList[ ulIndex ];
+        if ( ( pxElement->usFilterStringLength == usTopicFilterLength ) &&
+                ( pxElement->callback == callback ) &&
+                ( pxElement->priv_data == priv_data ) &&
+                ( strncmp( pxElement->pcSubscriptionFilterString, pcTopicFilterString, usTopicFilterLength ) == 0 ) ) {
+            free( pxElement->pcSubscriptionFilterString );
+            memset( pxElement, 0x00, sizeof( osal_mqtt_subscription_element_t ) );
+            subscription_count--;
+            break;
+        }
+    }
+
+    unlock_subscription_list();
 }
 
 void osal_mqtt_subscription_clear( void )

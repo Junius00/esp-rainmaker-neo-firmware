@@ -1256,7 +1256,8 @@ static osal_err_t subscribe( osal_mqtt_event_loop_channel_t *channel,
     pxCallbackContext->event_loop_event_id = xEventLoopRegistrationInfo.event_ids.subscribed;
 
     // add to subscription list if successful.
-    if (!osal_mqtt_subscription_add( topic, topic_len, channel, cb, qos, priv_data )) {
+    bool added = false;
+    if (!osal_mqtt_subscription_add_ex( topic, topic_len, channel, cb, qos, priv_data, &added )) {
         OSAL_LOGE( TAG, "Failed to add subscription to list. topic: %s", topic );
         prvFreeCommandContext( pxCallbackContext );
         return OSAL_ERR_INVALID_STATE;
@@ -1271,7 +1272,10 @@ static osal_err_t subscribe( osal_mqtt_event_loop_channel_t *channel,
     if (command_added != MQTTSuccess) {
         OSAL_LOGE( TAG, "Failed to enqueue subscribe command. Error code=%s", MQTT_Status_strerror( command_added ) );
 
-        osal_mqtt_subscription_remove( topic, topic_len );
+        /* Keep an entry that existed before this call, e.g. on a resubscribe. */
+        if (added) {
+            osal_mqtt_subscription_remove_entry( topic, topic_len, cb, priv_data );
+        }
         prvFreeCommandContext( pxCallbackContext );
         return mqtt_agent_status_to_os_err( command_added );
     }

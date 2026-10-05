@@ -50,6 +50,8 @@ void test_mqtt_subscription_handle_publish_invalid_params(void);
 void test_mqtt_subscription_duplicate_same_callback_not_added_twice(void);
 void test_mqtt_subscription_attempt_resubscribe_all_called(void);
 void test_mqtt_subscription_simulate_subacks_skips_qos0(void);
+void test_mqtt_subscription_add_ex_reports_new_entry(void);
+void test_mqtt_subscription_remove_entry_keeps_other_entries(void);
 
 /* --- Integration: Basic tests --- */
 

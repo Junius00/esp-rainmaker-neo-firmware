@@ -176,6 +176,56 @@ void test_mqtt_subscription_duplicate_same_callback_not_added_twice(void)
     osal_mqtt_subscription_remove(topic, topic_len);
 }
 
+static unsigned int __count_subscriptions(void)
+{
+    unsigned int count = 0;
+    osal_mqtt_subscription_element_t *list = osal_mqtt_subscription_get_list();
+    for (int i = 0; i < OSAL_MQTT_MAX_SUBSCRIPTIONS; i++) {
+        if (list[i].usFilterStringLength > 0) {
+            count++;
+        }
+    }
+    return count;
+}
+
+void test_mqtt_subscription_add_ex_reports_new_entry(void)
+{
+    subscription_test_setup();
+    const char *topic = "addex/topic";
+    uint16_t topic_len = (uint16_t)strlen(topic);
+    bool added = false;
+
+    TEST_ASSERT_TRUE(osal_mqtt_subscription_add_ex(topic, topic_len, NULL, test_sub_callback, QoS0, (void *)0x1, &added));
+    TEST_ASSERT_TRUE(added);
+    TEST_ASSERT_TRUE(osal_mqtt_subscription_add_ex(topic, topic_len, NULL, test_sub_callback, QoS0, (void *)0x1, &added));
+    TEST_ASSERT_FALSE(added);
+    TEST_ASSERT_TRUE(osal_mqtt_subscription_add_ex(topic, topic_len, NULL, test_sub_callback, QoS0, (void *)0x2, &added));
+    TEST_ASSERT_TRUE(added);
+    TEST_ASSERT_EQUAL(2, __count_subscriptions());
+
+    osal_mqtt_subscription_remove(topic, topic_len);
+}
+
+void test_mqtt_subscription_remove_entry_keeps_other_entries(void)
+{
+    subscription_test_setup();
+    const char *topic = "rmentry/topic";
+    uint16_t topic_len = (uint16_t)strlen(topic);
+    void *priv_keep = (void *)0x1;
+    void *priv_drop = (void *)0x2;
+
+    TEST_ASSERT_TRUE(osal_mqtt_subscription_add(topic, topic_len, NULL, test_sub_callback, QoS0, priv_keep));
+    TEST_ASSERT_TRUE(osal_mqtt_subscription_add(topic, topic_len, NULL, test_sub_callback, QoS0, priv_drop));
+    osal_mqtt_subscription_remove_entry(topic, topic_len, test_sub_callback, priv_drop);
+    TEST_ASSERT_EQUAL(1, __count_subscriptions());
+
+    TEST_ASSERT_TRUE(osal_mqtt_subscription_handle_publish(topic, topic_len, NULL, 0));
+    TEST_ASSERT_EQUAL(1, s_callback_invoked_count);
+    TEST_ASSERT_EQUAL_PTR(priv_keep, s_last_priv_data);
+
+    osal_mqtt_subscription_remove(topic, topic_len);
+}
+
 static unsigned int s_resubscribe_count;
 
 static osal_err_t mock_subscribe_fn(osal_mqtt_event_loop_channel_t *ch,
