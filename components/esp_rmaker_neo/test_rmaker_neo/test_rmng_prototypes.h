@@ -186,6 +186,8 @@ void test_timeseries_error_paths(void);
  * @brief Test timeseries queue behavior (FIFO order).
  */
 void test_timeseries_queue_behavior(void);
+void test_timeseries_failed_publish_keeps_queue_order(void);
+void test_timeseries_bad_entry_is_dropped(void);
 
 /* Protobuf helpers ************************************************************/
 

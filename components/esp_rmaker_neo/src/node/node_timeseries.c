@@ -148,10 +148,10 @@ static esp_rmaker_error_t __timeseries_generate_json(const __timeseries_data_t *
 /**
  * @brief Convert timeseries data to a JSON string.
  * @param[in] data Timeseries data.
- * @return JSON string, or NULL if an error occurs.
- *         The caller is responsible for freeing the JSON string using free().
+ * @param[out] p_json JSON string on success, NULL on error. The caller frees it with free().
+ * @return ESP_RMAKER_OK on success, ESP_RMAKER_NO_MEM on allocation failure, otherwise error code.
  */
-static char *__timeseries_data_to_json(const __timeseries_data_t *data);
+static esp_rmaker_error_t __timeseries_data_to_json(const __timeseries_data_t *data, char **p_json);
 
 /**
  * @brief Push timeseries data to the queue.
@@ -289,44 +289,39 @@ static esp_rmaker_error_t __timeseries_generate_json(const __timeseries_data_t *
     return ESP_RMAKER_OK;
 }
 
-static char *__timeseries_data_to_json(const __timeseries_data_t *data)
+static esp_rmaker_error_t __timeseries_data_to_json(const __timeseries_data_t *data, char **p_json)
 {
-    if (!data) {
-        return NULL;
+    if (!data || !p_json) {
+        return ESP_RMAKER_INVALID_ARG;
     }
-
-    char *payload = NULL;
+    *p_json = NULL;
 
     // First pass: get required JSON size
     size_t payload_size = 0;
     esp_rmaker_error_t err = __timeseries_generate_json(data, NULL, &payload_size);
     if (err != ESP_RMAKER_OK) {
         OSAL_LOGE(TAG, "Failed to calculate required JSON size");
-        goto timeseries_get_next_payload_fail;
+        return err;
     }
 
     // Allocate memory for payload
-    payload = OSAL_CALLOC_EXTRAM(payload_size, sizeof(char));
+    char *payload = OSAL_CALLOC_EXTRAM(payload_size, sizeof(char));
     if (!payload) {
         OSAL_LOGE(TAG, "Failed to allocate memory for JSON payload");
-        goto timeseries_get_next_payload_fail;
+        return ESP_RMAKER_NO_MEM;
     }
 
     // Second pass: generate JSON
     err = __timeseries_generate_json(data, payload, &payload_size);
     if (err != ESP_RMAKER_OK) {
         OSAL_LOGE(TAG, "Failed to generate JSON payload");
-        goto timeseries_get_next_payload_fail;
+        free(payload);
+        return err;
     }
 
     OSAL_LOGD(TAG, "Generated JSON payload: %s", payload);
-    return payload;
-
-timeseries_get_next_payload_fail:
-    if (payload) {
-        free(payload);
-    }
-    return NULL;
+    *p_json = payload;
+    return ESP_RMAKER_OK;
 }
 
 static esp_rmaker_error_t __timeseries_push_data(const __timeseries_data_t *data)
@@ -403,8 +398,9 @@ static void __timeseries_publish_task(void *unused)
         return;
     }
 
+    /* Peek, so a failed publish keeps the entry queued in order. */
     __timeseries_data_t data;
-    osal_err_t queue_err = osal_queue_receive(__timeseries_queue, &data, 0);
+    osal_err_t queue_err = osal_queue_peek(__timeseries_queue, &data, 0);
     if (queue_err != OSAL_ERR_OK) {
         return;
     }
@@ -424,10 +420,13 @@ static void __timeseries_publish_task(void *unused)
         }
 
         // Convert timeseries data to JSON
-        json = __timeseries_data_to_json(&data);
-        if (!json) {
-            OSAL_LOGE(TAG, "Failed to convert timeseries data to JSON");
-            err = ESP_RMAKER_INVALID_ARG;
+        err = __timeseries_data_to_json(&data, &json);
+        if (err != ESP_RMAKER_OK) {
+            /* Retry only an allocation failure; bad data never converts. */
+            if (err != ESP_RMAKER_NO_MEM) {
+                OSAL_LOGW(TAG, "Failed to convert timeseries data to JSON; dropping entry");
+                err = ESP_RMAKER_OK;
+            }
             break;
         }
 
@@ -454,7 +453,6 @@ static void __timeseries_publish_task(void *unused)
     /* Error handling */
     if (err != ESP_RMAKER_OK) {
         OSAL_LOGW(TAG, "Failed to publish timeseries data: %d - scheduling retry", err);
-        __timeseries_push_data(&data);
         /* Do not re-arm if the SDK is stopping/stopped (runtime gate) after this
          * task was queued; buffered data stays for a later resume. */
         if (esp_rmaker_should_do_work()) {
@@ -463,8 +461,10 @@ static void __timeseries_publish_task(void *unused)
             OSAL_LOGD(TAG, "Timeseries publishing gated off; skipping retry scheduling");
         }
     } else {
-        /* Free the data */
-        __timeseries_free_data_internals(&data);
+        /* Dequeue and free the published entry */
+        if (osal_queue_receive(__timeseries_queue, &data, 0) == OSAL_ERR_OK) {
+            __timeseries_free_data_internals(&data);
+        }
 
         /* Check for more data in the queue */
         queue_err = osal_queue_peek(__timeseries_queue, &data, 0);

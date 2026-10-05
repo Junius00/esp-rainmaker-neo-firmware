@@ -52,6 +52,8 @@ int test_rmng_all_tests_unity(void)
     RUN_TEST(test_timeseries_data_types);
     RUN_TEST(test_timeseries_error_paths);
     RUN_TEST(test_timeseries_queue_behavior);
+    RUN_TEST(test_timeseries_failed_publish_keeps_queue_order);
+    RUN_TEST(test_timeseries_bad_entry_is_dropped);
 
     /* Local control endpoint protocol *********************************************/
     RUN_TEST(test_local_ctrl_get_params_fragment_walk);
