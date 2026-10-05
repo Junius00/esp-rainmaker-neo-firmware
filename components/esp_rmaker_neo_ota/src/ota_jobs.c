@@ -977,10 +977,11 @@ static esp_rmaker_error_t pre_init_event_queue_enqueue_all_and_set_state_initial
         while (current != NULL) {
             ota_job_pre_init_event_t *next = current->next;
             // Pass ownership of the event data to the event loop
+            ota_job_event_t event = current->event_data->event;
+            /* enqueue_event takes ownership, also on failure. */
             err = enqueue_event(current->event_data, false);
             if (err != ESP_RMAKER_OK) {
-                OSAL_LOGE(TAG, "Failed to enqueue event '%s' to event loop: %d", ota_job_event_to_string(current->event_data->event), err);
-                free_event_data(current->event_data);
+                OSAL_LOGE(TAG, "Failed to enqueue event '%s' to event loop: %d", ota_job_event_to_string(event), err);
                 failed_at_least_once = true;
             }
             free(current);
