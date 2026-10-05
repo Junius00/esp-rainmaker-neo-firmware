@@ -321,6 +321,12 @@ void test_cloud_event_timesync_builder_registered(void);
 void test_cloud_event_timesync_response_sets_processed_bit(void);
 void test_cloud_event_timesync_response_ignores_invalid_time(void);
 
+/* Cloud manager inbox */
+void test_cloud_manager_failed_send_releases_context(void);
+void test_cloud_manager_newer_send_supersedes_context(void);
+void test_cloud_manager_response_during_failed_send(void);
+void test_cloud_manager_response_without_status_reports_failure(void);
+
 /* Network notify ****************************************************************/
 
 /**

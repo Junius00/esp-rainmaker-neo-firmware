@@ -122,6 +122,10 @@ int test_rmng_all_tests_unity(void)
     RUN_TEST(test_cloud_event_timesync_builder_registered);
     RUN_TEST(test_cloud_event_timesync_response_sets_processed_bit);
     RUN_TEST(test_cloud_event_timesync_response_ignores_invalid_time);
+    RUN_TEST(test_cloud_manager_failed_send_releases_context);
+    RUN_TEST(test_cloud_manager_newer_send_supersedes_context);
+    RUN_TEST(test_cloud_manager_response_during_failed_send);
+    RUN_TEST(test_cloud_manager_response_without_status_reports_failure);
 
     /* Network notify ****************************************************************/
     RUN_TEST(test_notify_init_deinit);
