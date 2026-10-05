@@ -22,6 +22,7 @@
 #include "esp_rmaker_data_model.h"
 #include "esp_rmaker_val.h"
 #include "esp_rmaker_mqtt_impl.h"
+#include "data_model_internal.h"
 
 void test_state_changes_lock_unlock(void)
 {
@@ -110,4 +111,25 @@ void test_state_changes_concurrent_mark_and_drain(void)
     esp_rmaker_node_deinit(node);
     TEST_ASSERT_EQUAL(ESP_RMAKER_OK, esp_rmaker_state_deinit());
     osal_event_loop_delete_default();
+}
+
+void test_state_update_id_compare_orders_by_address(void)
+{
+    /* 8-byte steps are not a multiple of either struct size, as with real heap blocks. */
+    static uint64_t buf[8];
+    const _esp_rmaker_device_t *dev_lo = (const _esp_rmaker_device_t *)&buf[0];
+    const _esp_rmaker_device_t *dev_hi = (const _esp_rmaker_device_t *)&buf[1];
+    const _esp_rmaker_param_t *param_lo = (const _esp_rmaker_param_t *)&buf[2];
+    const _esp_rmaker_param_t *param_hi = (const _esp_rmaker_param_t *)&buf[3];
+
+    _esp_rmaker_state_update_id_t a = { .device = dev_lo, .param = param_hi };
+    _esp_rmaker_state_update_id_t b = { .device = dev_hi, .param = param_lo };
+    _esp_rmaker_state_update_id_t c = { .device = dev_lo, .param = param_lo };
+    _esp_rmaker_state_update_id_t a2 = a;
+
+    TEST_ASSERT_LESS_THAN_INT(0, data_model_state_update_id_compare(&a, &b));
+    TEST_ASSERT_GREATER_THAN_INT(0, data_model_state_update_id_compare(&b, &a));
+    TEST_ASSERT_LESS_THAN_INT(0, data_model_state_update_id_compare(&c, &a));
+    TEST_ASSERT_GREATER_THAN_INT(0, data_model_state_update_id_compare(&a, &c));
+    TEST_ASSERT_EQUAL_INT(0, data_model_state_update_id_compare(&a, &a2));
 }

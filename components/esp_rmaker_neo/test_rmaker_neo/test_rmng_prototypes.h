@@ -479,6 +479,7 @@ void test_local_config_mqtt_params_missing(void);
  */
 void test_state_changes_lock_unlock(void);
 void test_state_changes_concurrent_mark_and_drain(void);
+void test_state_update_id_compare_orders_by_address(void);
 
 /* get_all ctx filtering */
 void test_get_all_rejects_null_ctx(void);

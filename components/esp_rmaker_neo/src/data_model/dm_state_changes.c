@@ -193,11 +193,14 @@ int data_model_state_update_id_compare(esp_rmaker_state_update_id_t update_id1, 
     _esp_rmaker_state_update_id_t *u1 = (_esp_rmaker_state_update_id_t *)update_id1;
     _esp_rmaker_state_update_id_t *u2 = (_esp_rmaker_state_update_id_t *)update_id2;
 
-    // Pure pointer comparison is sufficient since the list is sorted by device.
+    // Compare addresses, not pointer differences: separate allocations give a garbage sign.
     if (u1->device != u2->device) {
-        return (int)(u1->device - u2->device);
+        return ((uintptr_t)u1->device < (uintptr_t)u2->device) ? -1 : 1;
     }
-    return (int)(u1->param - u2->param);
+    if (u1->param != u2->param) {
+        return ((uintptr_t)u1->param < (uintptr_t)u2->param) ? -1 : 1;
+    }
+    return 0;
 }
 
 esp_rmaker_error_t data_model_state_update_id_get_all(const esp_rmaker_node_t *node, esp_rmaker_state_update_id_t **update_ids, size_t *num_update_ids)
