@@ -6,6 +6,10 @@ set(PROJECT_VER
     CACHE STRING "Firmware version"
 )
 
+# Crash build: the simulator aborts on boot instead of running. Used as an OTA payload that the bootloader has to roll
+# back.
+option(OTA_SIM_CRASH_ON_BOOT "Abort on boot instead of running the simulator" OFF)
+
 # ESP-IDF Platform ###
 if (ESP_PLATFORM)
     # Force minimal build
@@ -19,6 +23,9 @@ else ()
     project(ota-sim C ASM)
 
     add_executable(${PROJECT_NAME} main/app_main.c)
+    if (OTA_SIM_CRASH_ON_BOOT)
+        target_compile_definitions(${PROJECT_NAME} PRIVATE OTA_SIM_CRASH_ON_BOOT)
+    endif ()
 
     set(RMNG_ROOT ${CMAKE_CURRENT_LIST_DIR}/../../..)
 

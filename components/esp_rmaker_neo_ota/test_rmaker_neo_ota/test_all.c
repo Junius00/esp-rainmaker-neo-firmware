@@ -40,6 +40,26 @@ int test_rmng_ota_all_tests_unity(void)
     RUN_TEST(test_resume_matches_transport_none_returns_false);
     RUN_TEST(test_resume_matches_null_args_return_false);
 
+#ifndef ESP_PLATFORM
+    /* Partition helpers (util/ota_partition.c) */
+    RUN_TEST(test_partition_rollback_not_detected_when_all_slots_valid);
+    RUN_TEST(test_partition_rollback_detected_when_other_slot_aborted);
+    RUN_TEST(test_partition_rollback_detected_when_other_slot_invalid);
+    RUN_TEST(test_partition_rollback_not_detected_when_running_slot_aborted);
+    RUN_TEST(test_partition_rollback_not_detected_while_pending_verify);
+    RUN_TEST(test_partition_running_is_pending_verify_follows_boot_slot_state);
+
+    /* First boot after an OTA (esp_rmaker_ota.c) */
+    RUN_TEST(test_rollback_null_diag_waits_for_mqtt_before_valid);
+    RUN_TEST(test_rollback_null_diag_without_mqtt_rolls_back);
+    RUN_TEST(test_rollback_nvs_failure_still_rolls_back);
+    RUN_TEST(test_rollback_null_diag_mqtt_connect_marks_valid);
+    RUN_TEST(test_rollback_timer_failure_still_marks_valid_on_mqtt);
+    RUN_TEST(test_rollback_post_mqtt_diag_receives_config_priv);
+    RUN_TEST(test_rollback_mqtt_already_connected_marks_valid);
+    RUN_TEST(test_rollback_post_mqtt_diag_runs_once_if_already_connected);
+#endif /* ESP_PLATFORM */
+
     /* MQTT bitmap (mqtt_bitmap.c) */
     RUN_TEST(test_bitmap_init_exact_multiple_of_8);
     RUN_TEST(test_bitmap_init_non_multiple_has_padding_bits_set);

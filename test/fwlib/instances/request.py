@@ -571,17 +571,24 @@ class FirmwareInstanceDispatcher(TagLog):
         self._log(f"Released instance: {instance} for request: {request.to_key()}")
 
     def build_version_binary_if_not_built(
-        self, request: FirmwareInstanceRequest, version_str: str
+        self,
+        request: FirmwareInstanceRequest,
+        version_str: str,
+        variant: str = None,
+        cmake_args: list[str] = [],
     ) -> Path:
         """
         Build a version binary if it is not built.
         """
         self._log(
             f"Building version binary for request: {request.to_key()} with version: {version_str}"
+            f"{f' (variant: {variant})' if variant else ''}"
         )
         bin_path = self._get_pool(
             request
-        ).instance_factory.build_version_binary_if_not_built(version_str)
+        ).instance_factory.build_version_binary_if_not_built(
+            version_str, variant=variant, cmake_args=cmake_args
+        )
         self._log(
             f"Built version binary for request: {request.to_key()} with version: {version_str} @ {bin_path}"
         )
@@ -924,7 +931,11 @@ class FirmwareInstanceManager:
             )
 
     def build_version_binary_if_not_built(
-        self, request: FirmwareInstanceRequest, version_str: str
+        self,
+        request: FirmwareInstanceRequest,
+        version_str: str,
+        variant: str = None,
+        cmake_args: list[str] = [],
     ) -> Path:
         """
         Build a version binary if it is not built.
@@ -933,7 +944,7 @@ class FirmwareInstanceManager:
             if self.esp_dispatcher is None:
                 raise RuntimeError("ESP firmware is disabled (e.g. pytest --no-esp)")
             return self.esp_dispatcher.build_version_binary_if_not_built(
-                request, version_str
+                request, version_str, variant=variant, cmake_args=cmake_args
             )
         elif request.is_posix():
             if self.posix_dispatcher is None:
@@ -941,7 +952,7 @@ class FirmwareInstanceManager:
                     "POSIX firmware is disabled (e.g. pytest --no-posix)"
                 )
             return self.posix_dispatcher.build_version_binary_if_not_built(
-                request, version_str
+                request, version_str, variant=variant, cmake_args=cmake_args
             )
         else:
             raise ValueError(

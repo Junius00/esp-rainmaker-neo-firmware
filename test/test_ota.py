@@ -44,6 +44,11 @@ OTA_VERSIONS = [
     "3.0.0",
 ]
 
+# Crash-on-boot build of ota-sim (see the option in test/sims/ota-sim/CMakeLists.txt). It
+# aborts before it can mark itself valid, so the bootloader rolls back to the running image.
+_OTA_SIM_CRASH_VARIANT = "crash"
+_OTA_SIM_CRASH_CMAKE_ARG = "-DOTA_SIM_CRASH_ON_BOOT=ON"
+
 # Patch-only bumps over the device's baseline (1.0.0). These exercise the patch
 # field of the version comparator, which was previously dropped (so 1.0.0, 1.0.1,
 # 1.0.2 all compared equal and every patch upgrade was rejected as too low).
@@ -509,6 +514,23 @@ def device_sim_version_binary_builder(
         )
 
     yield _build
+
+
+@pytest.fixture(scope="function")
+def ota_crash_version_binary(
+    firmware_instance_request_ota_default, firmware_instance_manager
+):
+    """
+    Get the crash-on-boot binary and its version.
+    """
+    version = OTA_VERSIONS[0]
+    binary_path = firmware_instance_manager.build_version_binary_if_not_built(
+        firmware_instance_request_ota_default,
+        version,
+        variant=_OTA_SIM_CRASH_VARIANT,
+        cmake_args=[_OTA_SIM_CRASH_CMAKE_ARG],
+    )
+    return binary_path, version
 
 
 @pytest.fixture(scope="function")
@@ -1396,6 +1418,51 @@ def test_ota_rejects_project_name_mismatch(
     assert test_env.wait_on_state(
         {"OTA Remote": {"FW Version": old_fw_version}}, timeout=5
     ), "Firmware version should be unchanged after rejected cross-project binary"
+
+
+@pytest.mark.firmware
+def test_ota_reports_failure_after_bootloader_rollback(
+    ota_crash_version_binary,
+    associated_shadow_tracked_test_env,
+    ota_manager,
+    ota_job,
+):
+    """
+    Push an image that aborts on its first boot. It passes every pre-reboot check - the
+    project name and the declared version both match - so the device sets it as the boot
+    image and reboots into it, but it never marks itself valid. The bootloader then aborts
+    that slot and boots the previous image.
+
+    The device that comes back must report the job FAILED with the rollback reason. It
+    cannot rely on the new firmware reporting its own failure: the crash happens before any
+    of it runs, which is exactly the case that used to be reported as SUCCEEDED.
+    """
+    test_env = associated_shadow_tracked_test_env
+    thing_name = test_env.instance.factory_config.thing_name
+
+    crash_binary, version = ota_crash_version_binary
+    old_fw_version = _get_old_fw_version(test_env)
+
+    job_id = ota_job(crash_binary, thing_name, RmngOtaInfo(fw_version=version))
+    time.sleep(10)
+
+    # Default budget: the download, two reboots, and an MQTT reconnect all fit inside it.
+    expected_reason = _OTA_REASONS["ESP_RMAKER_OTA_FAILED_REASON_ROLLBACK_AFTER_REBOOT"]
+    job_status = ota_manager.wait_for_execution_status(
+        job_id,
+        thing_name,
+        "FAILED",
+        expected_details_check=_reason_check(expected_reason),
+    )
+    assert job_status is not None, (
+        f"Expected OTA job to FAIL with reason '{expected_reason}' after the bootloader "
+        f"rolled back the crashing image"
+    )
+
+    # The rolled back device runs the firmware it started with.
+    assert test_env.wait_on_state(
+        {"online": True, "OTA Remote": {"FW Version": old_fw_version}}, timeout=60
+    ), f"Firmware version is not back to '{old_fw_version}' after the rollback"
 
 
 # ---------------------------------------------------------------------------

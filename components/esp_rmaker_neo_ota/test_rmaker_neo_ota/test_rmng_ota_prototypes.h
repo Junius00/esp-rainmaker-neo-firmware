@@ -28,6 +28,26 @@ void rmaker_ota_status_test_reset_retry_schedule_count(void);
 void rmaker_ota_status_test_run_first_retry(void);
 #endif
 
+#ifndef ESP_PLATFORM
+/* Partition helpers (util/ota_partition.c). POSIX only: the fixtures need the POSIX OTA config. */
+void test_partition_rollback_not_detected_when_all_slots_valid(void);
+void test_partition_rollback_detected_when_other_slot_aborted(void);
+void test_partition_rollback_detected_when_other_slot_invalid(void);
+void test_partition_rollback_not_detected_when_running_slot_aborted(void);
+void test_partition_rollback_not_detected_while_pending_verify(void);
+void test_partition_running_is_pending_verify_follows_boot_slot_state(void);
+
+/* First boot after an OTA (esp_rmaker_ota.c). POSIX only, same reason as above. */
+void test_rollback_null_diag_waits_for_mqtt_before_valid(void);
+void test_rollback_null_diag_without_mqtt_rolls_back(void);
+void test_rollback_nvs_failure_still_rolls_back(void);
+void test_rollback_null_diag_mqtt_connect_marks_valid(void);
+void test_rollback_timer_failure_still_marks_valid_on_mqtt(void);
+void test_rollback_post_mqtt_diag_receives_config_priv(void);
+void test_rollback_mqtt_already_connected_marks_valid(void);
+void test_rollback_post_mqtt_diag_runs_once_if_already_connected(void);
+#endif /* ESP_PLATFORM */
+
 /* OTA status manager (ota_status.c) */
 void test_ota_status_retry_rearms_after_successful_publish(void);
 void test_ota_status_resend_pending_republishes_cached_terminals(void);

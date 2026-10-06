@@ -1549,7 +1549,10 @@ static ota_job_state_t handle_state_reboot_check(const ota_job_event_data_t *eve
                 esp_rmaker_ota_status_details_fill_succeeded(status_details, NULL, osal_sysinfo_get_fw_version());
             } else {
                 status = Failed;
-                esp_rmaker_ota_status_details_fill_failed(status_details, "Reboot check failed");
+                const char *reason = esp_rmaker_ota_partition_rollback_detected()
+                                     ? ESP_RMAKER_OTA_FAILED_REASON_ROLLBACK_AFTER_REBOOT
+                                     : ESP_RMAKER_OTA_FAILED_REASON_REBOOT_CHECK_FAILED;
+                esp_rmaker_ota_status_details_fill_failed(status_details, reason);
             }
             g_ota_state_ctx.current_job.current_status = status;
             err = ota_jobs_mqtt_publish_update_job_status(status, status_details);

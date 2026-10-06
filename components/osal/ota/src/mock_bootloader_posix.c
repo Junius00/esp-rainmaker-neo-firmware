@@ -13,6 +13,7 @@
 #include "osal_ota_posix_shared.h"
 
 /* Standard includes */
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -58,6 +59,85 @@ static void signal_handler(int signum)
 }
 
 /**
+ * @brief Check if the boot slot still waits for the running image to mark itself valid
+ *
+ * @return true if the boot slot is pending verification, false otherwise
+ */
+static bool boot_slot_is_pending_verify(void)
+{
+    uint8_t boot_idx;
+    if (osal_ota_posix_config_get_boot_partition(&boot_idx) != OSAL_ERR_OK) {
+        return false;
+    }
+    osal_ota_img_states_t state;
+    if (osal_ota_posix_config_get_partition_state(boot_idx, &state) != OSAL_ERR_OK) {
+        return false;
+    }
+    return state == OSAL_OTA_IMG_PENDING_VERIFY;
+}
+
+/**
+ * @brief Apply the rollback policy to the boot slot
+ *
+ * A new image gets one boot to mark itself valid. A slot still pending verification on
+ * the next boot crashed before it could, so it is aborted and the last valid slot boots.
+ *
+ * @param[in,out] boot_idx boot slot index, updated when a rollback happens
+ * @return OSAL_ERR_OK on success, error code otherwise
+ */
+static osal_err_t apply_rollback_policy(uint8_t *p_boot_idx)
+{
+    if (p_boot_idx == NULL) {
+        return OSAL_ERR_INVALID_ARG;
+    }
+    uint8_t boot_idx = *p_boot_idx;
+    if (boot_idx >= OSAL_OTA_POSIX_PART_COUNT) {
+        return OSAL_ERR_INVALID_ARG;
+    }
+
+    osal_ota_img_states_t state;
+    osal_err_t rc = osal_ota_posix_config_get_partition_state(boot_idx, &state);
+    if (rc != OSAL_ERR_OK) {
+        return rc;
+    }
+
+    /* New image: boot it for verification */
+    if (state == OSAL_OTA_IMG_NEW) {
+        bootloader_log("Booting new image in slot %u for verification", (unsigned)boot_idx);
+        return osal_ota_posix_config_set_partition_state(boot_idx, OSAL_OTA_IMG_PENDING_VERIFY);
+    }
+
+    /* Not pending verify or new image: already booted */
+    if (state != OSAL_OTA_IMG_PENDING_VERIFY) {
+        return OSAL_ERR_OK;
+    }
+
+    /* Pending verify: check if we can roll back to the last valid partition */
+    uint8_t last_valid_idx;
+    rc = osal_ota_posix_config_get_last_valid_partition(&last_valid_idx);
+    if (rc != OSAL_ERR_OK || last_valid_idx == boot_idx) {
+        bootloader_log("Slot %u is not verified, but there is nothing to roll back to", (unsigned)boot_idx);
+        return OSAL_ERR_OK;
+    }
+
+    /* Roll back to the last valid partition */
+    rc = osal_ota_posix_config_set_partition_state(boot_idx, OSAL_OTA_IMG_ABORTED);
+    if (rc != OSAL_ERR_OK) {
+        return rc;
+    }
+    rc = osal_ota_posix_config_set_boot_partition(last_valid_idx);
+    if (rc != OSAL_ERR_OK) {
+        return rc;
+    }
+
+    /* Update the boot slot index */
+    bootloader_log("Slot %u did not mark itself valid. Rolled back to slot %u",
+                   (unsigned)boot_idx, (unsigned)last_valid_idx);
+    *p_boot_idx = last_valid_idx;
+    return OSAL_ERR_OK;
+}
+
+/**
  * @brief Get the next target to boot
  *
  * @return path to the next target, NULL if not found
@@ -71,6 +151,10 @@ static const char *get_next_target(void)
     if (rc != OSAL_ERR_OK) {
         // Default to partition 0
         boot_idx = 0;
+    }
+
+    if (apply_rollback_policy(&boot_idx) != OSAL_ERR_OK) {
+        return NULL;
     }
 
     if (osal_ota_build_partition_path(boot_idx, next_target, sizeof(next_target)) != OSAL_ERR_OK) {
@@ -110,6 +194,10 @@ static const char *get_next_target(void)
  */
 int main(int argc, char **argv)
 {
+    /* Line buffering: a forked child inherits the buffer, and execv then discards
+     * whatever it holds. */
+    setvbuf(stdout, NULL, _IOLBF, BUFSIZ);
+
     bootloader_log("Starting bootloader");
     int code = POSIX_EXIT_SUCCESS;
 
@@ -153,6 +241,12 @@ int main(int argc, char **argv)
         code = wait_for_child_exit();
         if (code == POSIX_EXIT_REBOOT) {
             bootloader_log("Rebooting system");
+            continue;
+        }
+        /* A crash during verification reboots, the way a panic does on hardware. The
+         * rollback policy then aborts that slot, so this cannot loop. */
+        if (code < 0 && boot_slot_is_pending_verify()) {
+            bootloader_log("Target crashed before it was verified. Rebooting system");
             continue;
         }
         break;

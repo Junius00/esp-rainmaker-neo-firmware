@@ -464,6 +464,14 @@ static esp_rmaker_error_t app_network_reset_credentials(void)
 
 osal_err_t app_run(void)
 {
+#if defined(OTA_SIM_CRASH_ON_BOOT)
+    /* Crash build (-DOTA_SIM_CRASH_ON_BOOT=ON): abort before anything else runs, so this
+     * image never marks itself valid and the bootloader rolls back to the previous one.
+     * The itests push it as an OTA payload to make a real rollback happen. */
+    OSAL_LOGE(TAG, "Aborting to trigger a bootloader rollback");
+    abort();
+#endif /* OTA_SIM_CRASH_ON_BOOT */
+
     OSAL_LOGI(TAG, "Starting ota-sim");
 
     /* Initialise the RMNG serial console. */

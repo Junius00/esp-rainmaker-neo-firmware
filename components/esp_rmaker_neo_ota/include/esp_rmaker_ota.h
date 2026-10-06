@@ -213,8 +213,8 @@ typedef struct {
     esp_rmaker_ota_validate_image_ref_t validate_image_ref;
     /** OTA Diagnostics Callback.
      * A post OTA diagnostic handler to be invoked if app rollback feature is enabled.
-     * If kept NULL, the new firmware will be assumed to be fine,
-     * and no rollback will be performed.
+     * If kept NULL, the new firmware is marked valid on the first MQTT connection.
+     * If MQTT does not connect within CONFIG_RMNG_OTA_ROLLBACK_WAIT_PERIOD, a rollback occurs.
      */
     esp_rmaker_post_ota_diag_t ota_diag;
     /** Private Data.

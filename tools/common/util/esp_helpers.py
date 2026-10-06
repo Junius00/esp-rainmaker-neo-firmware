@@ -477,10 +477,12 @@ class EspFirmwareManager:
         build_dir: Path,
         use_temp_project_dir: bool = False,
         add_configs: dict[str, str] = {},
+        cmake_args: list[str] = [],
     ):
         """
         Build the firmware with the additional configs.
         If use_temp_project_dir is True, the project directory will be cloned and used instead of the original project directory.
+        cmake_args are passed to CMake as-is, for project options that are not sdkconfig options.
         """
         project_dir = self.project_dir
         if use_temp_project_dir:
@@ -516,6 +518,7 @@ class EspFirmwareManager:
                         build_dir,
                         f"-DSDKCONFIG_DEFAULTS={sdkconfig_defaults_path}",
                         f"-DSDKCONFIG={sdkconfig_path}",
+                        *cmake_args,
                         "--ccache",
                         "set-target",
                         self.target,
