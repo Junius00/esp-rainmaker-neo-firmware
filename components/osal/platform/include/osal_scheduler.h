@@ -97,7 +97,7 @@ osal_err_t osal_scheduler_stop_timer(osal_scheduler_task_handle_t handle);
 /**
  * @brief Cancel a scheduled task, and sets the handle to NULL. The task will not be executed.
  *
- * @note The task handle is invalidated.
+ * @note The handle is invalid after this call: discard every copy, and do not cancel it while another call uses it.
  *
  * @note Non-blocking, so it is safe from inside a task callback, including on
  *       that callback's own handle. It does not wait, though: a task already
