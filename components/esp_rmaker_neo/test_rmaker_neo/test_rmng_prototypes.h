@@ -186,6 +186,8 @@ void test_timeseries_error_paths(void);
  * @brief Test timeseries queue behavior (FIFO order).
  */
 void test_timeseries_queue_behavior(void);
+void test_timeseries_failed_publish_keeps_queue_order(void);
+void test_timeseries_bad_entry_is_dropped(void);
 
 /* Protobuf helpers ************************************************************/
 
@@ -320,6 +322,12 @@ void test_cloud_event_timesync_builder(void);
 void test_cloud_event_timesync_builder_registered(void);
 void test_cloud_event_timesync_response_sets_processed_bit(void);
 void test_cloud_event_timesync_response_ignores_invalid_time(void);
+
+/* Cloud manager inbox */
+void test_cloud_manager_failed_send_releases_context(void);
+void test_cloud_manager_newer_send_supersedes_context(void);
+void test_cloud_manager_response_during_failed_send(void);
+void test_cloud_manager_response_without_status_reports_failure(void);
 
 /* Network notify ****************************************************************/
 
@@ -479,6 +487,7 @@ void test_local_config_mqtt_params_missing(void);
  */
 void test_state_changes_lock_unlock(void);
 void test_state_changes_concurrent_mark_and_drain(void);
+void test_state_update_id_compare_orders_by_address(void);
 
 /* get_all ctx filtering */
 void test_get_all_rejects_null_ctx(void);

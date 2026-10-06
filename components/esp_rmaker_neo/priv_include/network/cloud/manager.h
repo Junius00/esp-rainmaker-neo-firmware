@@ -79,6 +79,7 @@ bool esp_rmaker_cloud_manager_is_listening(void);
  * @param[in] p_event      Pointer to the event array.
  * @param[in] event_count  Number of events to send.
  * @param[in] sub_channel  Sub channel to send the events to.
+ * @note Takes ownership of each p_set_response_cb_context, also when the call fails.
  *
  * @return ESP_RMAKER_OK on success.
  * @return ESP_RMAKER_INVALID_ARG if p_event is NULL or event_count is 0.
@@ -103,6 +104,7 @@ esp_rmaker_error_t esp_rmaker_cloud_manager_send(const esp_rmaker_topic_ctx_t *c
  * @param[in] p_event      Pointer to the event array.
  * @param[in] event_count  Number of events to send.
  * @param[in] sub_channel  Sub channel to send the events to.
+ * @note Takes ownership of each p_set_response_cb_context, also when the call fails.
  *
  * @return ESP_RMAKER_OK on success.
  * @return ESP_RMAKER_INVALID_ARG if p_event is NULL or event_count is 0.

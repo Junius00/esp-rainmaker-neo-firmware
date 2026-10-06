@@ -49,6 +49,7 @@ typedef void (*esp_rmaker_cloud_event_set_response_cb_t)(esp_rmaker_cloud_event_
 
 /**
  * @brief Cloud 'set' event response callback context.
+ * @note The cloud manager owns the context once sent; the callback owns priv_data, or the manager frees it if the callback never runs.
  */
 typedef struct {
     esp_rmaker_cloud_event_set_response_cb_t cb;
@@ -284,8 +285,8 @@ void esp_rmaker_cloud_event_response_getTriggerDetails(esp_rmaker_cloud_events_t
  * @note This event is used to set the node configuration.
  * @param[out] p_event Pointer to the event.
  * @param[in] node_config_str Node configuration string.
- * @param[in] p_set_response_cb_context Pointer to the response callback context for 'set' events. Should be allocated until the callback is called. Will be freed by the event handler.
- * @note The callback context is freed by the event handler.
+ * @param[in] p_set_response_cb_context Pointer to the response callback context for 'set' events.
+ * @note The cloud manager owns the context once sent; see esp_rmaker_cloud_event_set_response_cb_context_t.
  *
  * @return ESP_RMAKER_OK on success, otherwise error code.
  */

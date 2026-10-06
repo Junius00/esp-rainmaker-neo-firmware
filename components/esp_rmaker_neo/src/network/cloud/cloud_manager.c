@@ -265,6 +265,98 @@ static void __unlock_inbox(void)
     osal_semaphore_give(inbox.mutex);
 }
 
+static void __inbox_drop_context(esp_rmaker_cloud_event_set_response_cb_context_t *p_cb_ctx)
+{
+    if (p_cb_ctx) {
+        free(p_cb_ctx->priv_data);
+        free(p_cb_ctx);
+    }
+}
+
+/* Free the callback contexts of p_event[0..count) that were never registered. */
+static void __drop_event_contexts(const esp_rmaker_cloud_event_t *p_event, size_t count)
+{
+    for (size_t i = 0; i < count; i++) {
+        __inbox_drop_context(p_event[i].p_set_response_cb_context);
+    }
+}
+
+/* Unregister and free the callback contexts of p_event[0..count). */
+static void __inbox_release(const esp_rmaker_topic_ctx_t *ctx, const esp_rmaker_cloud_event_t *p_event, size_t count)
+{
+    for (size_t i = 0; i < count; i++) {
+        esp_rmaker_cloud_event_set_response_cb_context_t *p_cb_ctx = p_event[i].p_set_response_cb_context;
+        if (!p_cb_ctx) {
+            continue;
+        }
+        bool cleared = false;
+        __lock_inbox();
+        for (size_t j = 0; j < inbox.num_entries; j++) {
+            if (inbox.entries[j].p_set_response_cb_context == p_cb_ctx && inbox.entries[j].ctx == ctx &&
+                    strcmp(inbox.entries[j].event_name, p_event[i].name) == 0) {
+                inbox.entries[j].p_set_response_cb_context = NULL;
+                inbox.entries[j].ctx = NULL;
+                cleared = true;
+            }
+        }
+        __unlock_inbox();
+        /* Not in the inbox: the response handler already ran and freed it. */
+        if (cleared) {
+            __inbox_drop_context(p_cb_ctx);
+        }
+    }
+}
+
+/* Register the callback contexts of p_event; on failure, release them all. */
+static esp_rmaker_error_t __inbox_register(const esp_rmaker_topic_ctx_t *ctx, const esp_rmaker_cloud_event_t *p_event, size_t event_count)
+{
+    for (size_t i = 0; i < event_count; i++) {
+        if (!p_event[i].p_set_response_cb_context) {
+            continue;
+        }
+        esp_rmaker_cloud_event_set_response_cb_context_t *p_superseded = NULL;
+        __lock_inbox();
+        size_t free_slot = inbox.num_entries;
+        bool matched = false;
+        for (size_t j = 0; j < inbox.num_entries; j++) {
+            if (inbox.entries[j].event_name == NULL ||
+                    inbox.entries[j].p_set_response_cb_context == NULL) {
+                if (free_slot == inbox.num_entries) {
+                    free_slot = j;
+                }
+                continue;
+            }
+            if (inbox.entries[j].ctx == ctx &&
+                    strcmp(p_event[i].name, inbox.entries[j].event_name) == 0) {
+                /* The newest request takes over the slot. */
+                p_superseded = inbox.entries[j].p_set_response_cb_context;
+                inbox.entries[j].p_set_response_cb_context = p_event[i].p_set_response_cb_context;
+                matched = true;
+                break;
+            }
+        }
+        if (!matched && free_slot < inbox.num_entries) {
+            inbox.entries[free_slot].event_name = p_event[i].name;
+            inbox.entries[free_slot].ctx = ctx;
+            inbox.entries[free_slot].p_set_response_cb_context = p_event[i].p_set_response_cb_context;
+            matched = true;
+        }
+        __unlock_inbox();
+
+        if (!matched) {
+            OSAL_LOGE(TAG, "Inbox full - cannot send event '%s' (ctx=%p)", p_event[i].name, (const void *)ctx);
+            __inbox_release(ctx, p_event, i);
+            __drop_event_contexts(&p_event[i], event_count - i);
+            return ESP_RMAKER_NO_MEM;
+        }
+        if (p_superseded != p_event[i].p_set_response_cb_context) {
+            /* No callback: the newer request's callback reports for the same event. */
+            __inbox_drop_context(p_superseded);
+        }
+    }
+    return ESP_RMAKER_OK;
+}
+
 int __cloud_manager_make_json_payload(esp_rmaker_cloud_event_t *p_event, size_t event_count, char *buf, size_t buf_size)
 {
     json_gen_str_t jpayload;
@@ -716,19 +808,18 @@ static void __set_event_response_payload_handler(const esp_rmaker_topic_ctx_t *c
 
     /* Check success */
     char status[10];
+    char error_message[100] = "Missing status";
+    response.error_message = NULL;
     if (json_obj_get_string(p_jctx, "status", status, sizeof(status)) != 0) {
         OSAL_LOGE(TAG, "Failed to get status");
-        goto set_handler_end;
-    }
-    response.success = strcmp(status, "success") == 0;
-    if (!response.success) {
-        /* Get error message */
-        char error_message[100];
-        if (json_obj_get_string(p_jctx, "message", error_message, sizeof(error_message)) == 0) {
+        response.success = false;
+        response.error_message = error_message;
+    } else {
+        response.success = strcmp(status, "success") == 0;
+        if (!response.success &&
+                json_obj_get_string(p_jctx, "message", error_message, sizeof(error_message)) == 0) {
             response.error_message = error_message;
         }
-    } else {
-        response.error_message = NULL;
     }
 
     /* Call callback and free */
@@ -930,6 +1021,9 @@ esp_rmaker_error_t esp_rmaker_cloud_manager_deinit(void)
 
     /* Free the inbox entries and mutex */
     if (inbox.entries) {
+        for (size_t i = 0; i < inbox.num_entries; i++) {
+            __inbox_drop_context(inbox.entries[i].p_set_response_cb_context);
+        }
         free(inbox.entries);
     }
     inbox.entries = NULL;
@@ -1091,58 +1185,21 @@ static esp_rmaker_error_t __send_with_topic(const esp_rmaker_topic_ctx_t *ctx,
     int payload_size = __cloud_manager_make_json_payload(p_event, event_count, NULL, 0);
     if (payload_size < 0) {
         OSAL_LOGE(TAG, "Failed to get required JSON payload size");
+        __drop_event_contexts(p_event, event_count);
         return ESP_RMAKER_INVALID_ARG;
     }
     char *payload = (char *)OSAL_CALLOC_EXTRAM(payload_size, sizeof(char));
     if (!payload) {
         OSAL_LOGE(TAG, "Failed to allocate memory for payload");
+        __drop_event_contexts(p_event, event_count);
         return ESP_RMAKER_NO_MEM;
     }
     payload_size = __cloud_manager_make_json_payload(p_event, event_count, payload, payload_size);
     if (payload_size < 0) {
         OSAL_LOGE(TAG, "Failed to generate JSON payload");
         free(payload);
+        __drop_event_contexts(p_event, event_count);
         return ESP_RMAKER_INVALID_ARG;
-    }
-
-    /* Register set-response callbacks in inbox. The inbox is now keyed
-     * by (event_name, ctx); on first-time registration of a new tuple
-     * we allocate a fresh slot (capped at inbox.num_entries). */
-    for (size_t i = 0; i < event_count; i++) {
-        if (!p_event[i].p_set_response_cb_context) {
-            continue;
-        }
-        __lock_inbox();
-        /* Find an existing slot matching (event_name, ctx), else a free slot. */
-        size_t free_slot = inbox.num_entries;
-        bool matched = false;
-        for (size_t j = 0; j < inbox.num_entries; j++) {
-            if (inbox.entries[j].event_name == NULL ||
-                    inbox.entries[j].p_set_response_cb_context == NULL) {
-                if (free_slot == inbox.num_entries) {
-                    free_slot = j;
-                }
-                continue;
-            }
-            if (inbox.entries[j].ctx == ctx &&
-                    strcmp(p_event[i].name, inbox.entries[j].event_name) == 0) {
-                /* Overwrite existing in-flight callback for the same ctx. */
-                inbox.entries[j].p_set_response_cb_context = p_event[i].p_set_response_cb_context;
-                matched = true;
-                break;
-            }
-        }
-        if (!matched) {
-            if (free_slot >= inbox.num_entries) {
-                OSAL_LOGE(TAG, "Inbox full - dropping callback for event '%s' (ctx=%p)",
-                          p_event[i].name, (const void *)ctx);
-            } else {
-                inbox.entries[free_slot].event_name = p_event[i].name;
-                inbox.entries[free_slot].ctx = ctx;
-                inbox.entries[free_slot].p_set_response_cb_context = p_event[i].p_set_response_cb_context;
-            }
-        }
-        __unlock_inbox();
     }
 
     /* Send payload */
@@ -1160,13 +1217,22 @@ static esp_rmaker_error_t __send_with_topic(const esp_rmaker_topic_ctx_t *ctx,
     default:
         OSAL_LOGE(TAG, "Invalid send topic kind: %d", (int)kind);
         free(payload);
+        __drop_event_contexts(p_event, event_count);
         return ESP_RMAKER_INVALID_ARG;
     }
     if (topic_len < 0 || (size_t)topic_len >= sizeof(publish_topic)) {
         OSAL_LOGE(TAG, "Failed to build to_cloud MQTT topic (kind=%d)", (int)kind);
         free(payload);
+        __drop_event_contexts(p_event, event_count);
         return ESP_RMAKER_FAIL;
     }
+    /* Register after the topic is built, so only a failed publish must unregister. */
+    esp_rmaker_error_t err = __inbox_register(ctx, p_event, event_count);
+    if (err != ESP_RMAKER_OK) {
+        free(payload);
+        return err;
+    }
+
     OSAL_LOGI(TAG, "Sending to cloud using topic: %s", publish_topic);
     OSAL_LOGD(TAG, "Sending payload to cloud: %s", payload);
     osal_mqtt_event_loop_channel_t channel = {
@@ -1176,6 +1242,7 @@ static esp_rmaker_error_t __send_with_topic(const esp_rmaker_topic_ctx_t *ctx,
     osal_err_t mqtt_err = esp_rmaker_mqtt_impl.publish(&channel, publish_topic, strlen(publish_topic), payload, payload_size - 1, QoS1, false);
     if (mqtt_err != OSAL_ERR_OK) {
         OSAL_LOGE(TAG, "Failed to send payload to cloud error: %d", mqtt_err);
+        __inbox_release(ctx, p_event, event_count);
         free(payload);
         return ESP_RMAKER_FAIL;
     }

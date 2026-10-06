@@ -23,6 +23,7 @@
 #include "json_parser.h"
 
 #include "node/node_timeseries.c"
+#include "esp_rmaker_runtime_gate.h"
 
 static const char *TEST_TAG = "test_timeseries";
 
@@ -173,7 +174,8 @@ static char *__get_next_payload(void)
         return NULL;
     }
 
-    char *payload = __timeseries_data_to_json(&data);
+    char *payload = NULL;
+    (void) __timeseries_data_to_json(&data, &payload);
     __timeseries_free_data_internals(&data);
     return payload;
 }
@@ -607,4 +609,89 @@ void test_timeseries_queue_behavior(void)
     char *payload = __get_next_payload();
     TEST_ASSERT_NULL_MESSAGE(payload, "Should not have more payloads");
     TEST_ASSERT_EQUAL_MESSAGE(ESP_RMAKER_OK, timeseries_deinit(), "Should deinitialize successfully");
+}
+
+static osal_err_t __publish_fail(osal_mqtt_event_loop_channel_t *channel, const char *topic, size_t topic_len,
+                                 void *data, size_t data_len, osal_mqtt_QoS_t qos, bool retain)
+{
+    (void)channel; (void)topic; (void)topic_len; (void)data; (void)data_len; (void)qos; (void)retain;
+    return OSAL_ERR_MQTT_NOT_CONNECTED;
+}
+
+void test_timeseries_failed_publish_keeps_queue_order(void)
+{
+    TEST_ASSERT_EQUAL(ESP_RMAKER_OK, timeseries_init());
+    osal_mqtt_impl_t saved_impl = esp_rmaker_mqtt_impl;
+    esp_rmaker_mqtt_impl.publish = __publish_fail;
+    esp_rmaker_runtime_gate_set_active(true);
+
+    const char *param_names[] = {"t1", "t2", "t3"};
+    test_timeseries_data_t expected[3];
+    for (uint32_t i = 0; i < 3; i++) {
+        expected[i] = (test_timeseries_data_t) {
+            param_names[i], esp_rmaker_int((int)i), false, TEST_TIMESTAMP_BASE + i
+        };
+        __timeseries_data_t data = __create_test_data(param_names[i], expected[i].val, false, expected[i].timestamp);
+        data.topic_ctx = &esp_rmaker_topic_ctx_self;
+        TEST_ASSERT_EQUAL(ESP_RMAKER_OK, __timeseries_push_data(&data));
+    }
+
+    __timeseries_publish_task(NULL);
+
+    esp_rmaker_runtime_gate_set_active(false);
+    esp_rmaker_mqtt_impl = saved_impl;
+
+    /* The failed head entry must stay first; a re-queue would move it to the tail. */
+    for (uint32_t i = 0; i < 3; i++) {
+        char *payload = __get_next_payload();
+        TEST_ASSERT_NOT_NULL(payload);
+        __validate_json_payload(payload, &expected[i]);
+        free(payload);
+    }
+    TEST_ASSERT_NULL(__get_next_payload());
+    TEST_ASSERT_EQUAL(ESP_RMAKER_OK, timeseries_deinit());
+}
+
+static int s_publish_count;
+
+static osal_err_t __publish_count(osal_mqtt_event_loop_channel_t *channel, const char *topic, size_t topic_len,
+                                  void *data, size_t data_len, osal_mqtt_QoS_t qos, bool retain)
+{
+    (void)channel; (void)topic; (void)topic_len; (void)data; (void)data_len; (void)qos; (void)retain;
+    s_publish_count++;
+    return OSAL_ERR_OK;
+}
+
+void test_timeseries_bad_entry_is_dropped(void)
+{
+    TEST_ASSERT_EQUAL(ESP_RMAKER_OK, timeseries_init());
+    osal_mqtt_impl_t saved_impl = esp_rmaker_mqtt_impl;
+    esp_rmaker_mqtt_impl.publish = __publish_count;
+    s_publish_count = 0;
+    esp_rmaker_runtime_gate_set_active(true);
+
+    /* No timezone, so the JSON conversion always fails. */
+    __timeseries_data_t bad = __create_test_data("bad", esp_rmaker_int(0), false, TEST_TIMESTAMP_BASE);
+    free(bad.timestamp.iana_tz);
+    bad.timestamp.iana_tz = NULL;
+    bad.topic_ctx = &esp_rmaker_topic_ctx_self;
+    TEST_ASSERT_EQUAL(OSAL_ERR_OK, osal_queue_send(__timeseries_queue, &bad, 0));
+
+    test_timeseries_data_t expected = {"good", esp_rmaker_int(1), false, TEST_TIMESTAMP_BASE + 1};
+    __timeseries_data_t good = __create_test_data(expected.path, expected.val, false, expected.timestamp);
+    good.topic_ctx = &esp_rmaker_topic_ctx_self;
+    TEST_ASSERT_EQUAL(ESP_RMAKER_OK, __timeseries_push_data(&good));
+
+    __timeseries_publish_task(NULL);
+
+    esp_rmaker_runtime_gate_set_active(false);
+    esp_rmaker_mqtt_impl = saved_impl;
+
+    TEST_ASSERT_EQUAL(0, s_publish_count);
+    char *payload = __get_next_payload();
+    TEST_ASSERT_NOT_NULL(payload);
+    __validate_json_payload(payload, &expected);
+    free(payload);
+    TEST_ASSERT_NULL(__get_next_payload());
+    TEST_ASSERT_EQUAL(ESP_RMAKER_OK, timeseries_deinit());
 }

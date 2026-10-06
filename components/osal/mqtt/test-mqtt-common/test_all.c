@@ -46,6 +46,8 @@ int test_mqtt_common_all_tests_unity(void)
     RUN_TEST(test_mqtt_subscription_duplicate_same_callback_not_added_twice);
     RUN_TEST(test_mqtt_subscription_attempt_resubscribe_all_called);
     RUN_TEST(test_mqtt_subscription_simulate_subacks_skips_qos0);
+    RUN_TEST(test_mqtt_subscription_add_ex_reports_new_entry);
+    RUN_TEST(test_mqtt_subscription_remove_entry_keeps_other_entries);
 
     /* --- Integration: TLS (server only) --- */
     RUN_TEST(test_mqtt_tls_server_only_sub_pub_unsub_pub);

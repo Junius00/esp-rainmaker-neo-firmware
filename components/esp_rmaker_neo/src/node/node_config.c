@@ -518,7 +518,7 @@ esp_rmaker_error_t esp_rmaker_internal_report_node_config_for_node(const esp_rma
     esp_rmaker_error_t ret = esp_rmaker_cloud_manager_send(esp_rmaker_node_topic_ctx(node), &event, 1, MQTT_CHANNEL_SUB_CLOUD_MANAGER_REPORT_NODE_CONFIG);
     if (ret != ESP_RMAKER_OK) {
         OSAL_LOGE(TAG, "Failed to report Node Configuration to cloud");
-        free(priv); free(cbctx); free(node_config);
+        free(node_config);
         return ret;
     }
     free(node_config);

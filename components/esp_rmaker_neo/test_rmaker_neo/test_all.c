@@ -52,6 +52,8 @@ int test_rmng_all_tests_unity(void)
     RUN_TEST(test_timeseries_data_types);
     RUN_TEST(test_timeseries_error_paths);
     RUN_TEST(test_timeseries_queue_behavior);
+    RUN_TEST(test_timeseries_failed_publish_keeps_queue_order);
+    RUN_TEST(test_timeseries_bad_entry_is_dropped);
 
     /* Local control endpoint protocol *********************************************/
     RUN_TEST(test_local_ctrl_get_params_fragment_walk);
@@ -122,6 +124,10 @@ int test_rmng_all_tests_unity(void)
     RUN_TEST(test_cloud_event_timesync_builder_registered);
     RUN_TEST(test_cloud_event_timesync_response_sets_processed_bit);
     RUN_TEST(test_cloud_event_timesync_response_ignores_invalid_time);
+    RUN_TEST(test_cloud_manager_failed_send_releases_context);
+    RUN_TEST(test_cloud_manager_newer_send_supersedes_context);
+    RUN_TEST(test_cloud_manager_response_during_failed_send);
+    RUN_TEST(test_cloud_manager_response_without_status_reports_failure);
 
     /* Network notify ****************************************************************/
     RUN_TEST(test_notify_init_deinit);
@@ -251,6 +257,7 @@ int test_rmng_all_tests_unity(void)
     /* State changes ****************************************************************/
     RUN_TEST(test_state_changes_lock_unlock);
     RUN_TEST(test_state_changes_concurrent_mark_and_drain);
+    RUN_TEST(test_state_update_id_compare_orders_by_address);
     RUN_TEST(test_get_all_rejects_null_ctx);
     RUN_TEST(test_get_all_self_ctx_returns_self_params_only);
 #ifdef CONFIG_RMNG_BRIDGE_ENABLED

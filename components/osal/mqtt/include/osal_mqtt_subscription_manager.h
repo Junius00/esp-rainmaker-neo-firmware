@@ -90,6 +90,26 @@
                                      void *priv_data );
 
     /**
+     * @brief Same as ::osal_mqtt_subscription_add, and report whether a new entry was created.
+     * @note *p_added is false when the same topic, callback and priv_data were already in the list.
+     */
+    bool osal_mqtt_subscription_add_ex( const char *pcTopicFilterString,
+                                        uint16_t usTopicFilterLength,
+                                        osal_mqtt_event_loop_channel_t *channel,
+                                        osal_mqtt_subscribe_cb_t callback,
+                                        osal_mqtt_QoS_t qos,
+                                        void *priv_data,
+                                        bool *p_added );
+
+    /**
+     * @brief Remove only the entry that matches the topic filter, callback and priv_data.
+     */
+    void osal_mqtt_subscription_remove_entry( const char *pcTopicFilterString,
+            uint16_t usTopicFilterLength,
+            osal_mqtt_subscribe_cb_t callback,
+            void *priv_data );
+
+    /**
      * @brief Remove a subscription from the subscription list.
      *
      * @note If the topic filter exists multiple times in the subscription list,
