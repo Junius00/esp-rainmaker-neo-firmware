@@ -150,12 +150,17 @@ class FirmwareInstanceFactoryEsp(FirmwareInstanceFactory):
             project_description = json.load(f)
             self.baudrate = int(project_description.get("monitor_baud", 115200))
 
-    def build_version_binary_if_not_built(self, version_str: str) -> Path:
+    def build_version_binary_if_not_built(
+        self,
+        version_str: str,
+        variant: str = None,
+        cmake_args: list[str] = [],
+    ) -> Path:
         """
         Build a binary with a specific firmware version if it is not built.
         Returns the path to the binary.
         """
-        build_dir = self._get_build_dir(version_str)
+        build_dir = self._get_build_dir(version_str, variant=variant)
         with self._get_build_dir_lock(build_dir):
             if self._is_built_locked(build_dir):
                 return build_dir / self.binary_name
@@ -171,7 +176,10 @@ class FirmwareInstanceFactoryEsp(FirmwareInstanceFactory):
             }
             # Use a temporary project directory for thread safe build
             self.fw_manager.build(
-                build_dir, add_configs=add_configs, use_temp_project_dir=True
+                build_dir,
+                add_configs=add_configs,
+                use_temp_project_dir=True,
+                cmake_args=cmake_args,
             )
 
             # Mark the build directory as built

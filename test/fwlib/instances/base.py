@@ -393,15 +393,19 @@ class FirmwareInstanceFactory:
         """
         return {}
 
-    def _get_build_dir(self, version_str: str = None) -> Path:
+    def _get_build_dir(self, version_str: str = None, variant: str = None) -> Path:
         """
         Get the build directory for the given target.
+        A variant gets its own directory, so it does not clash with the plain build of the
+        same version.
         """
 
         # Build the folder name
         folder_name = self.get_id()
         if version_str is not None:
             folder_name += f"-v{version_str}"
+        if variant is not None:
+            folder_name += f"-{variant}"
 
         # Build the build directory
         cwd = os.getcwd()
@@ -456,11 +460,18 @@ class FirmwareInstanceFactory:
         """
         raise NotImplementedError("build() is not implemented")
 
-    def build_version_binary_if_not_built(self, version_str: str) -> Path:
+    def build_version_binary_if_not_built(
+        self,
+        version_str: str,
+        variant: str = None,
+        cmake_args: list[str] = [],
+    ) -> Path:
         """
         {abstract}
         Build a binary with a specific firmware version if it is not built.
         Returns the path to the binary.
+        A variant builds into its own directory, so a build with extra cmake_args does not
+        clash with the plain build of the same version.
         """
         raise NotImplementedError(
             "build_version_binary_if_not_built() is not implemented"

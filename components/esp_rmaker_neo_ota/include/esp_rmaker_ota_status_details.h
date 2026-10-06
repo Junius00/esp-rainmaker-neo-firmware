@@ -181,6 +181,13 @@ typedef struct {
  *  callback, so the job could never terminate. Reported after the reboot. */
 #define ESP_RMAKER_OTA_FAILED_REASON_CUSTOM_FILETYPE_HANDLER_NO_POST_REBOOT_HANDLER "Custom filetype handler does not have a post reboot handler even though it was instructed to reboot post-download"
 
+/** The bootloader rolled back to the previous firmware, so the new image never ran
+ *  long enough to be verified. Reported after the rollback. */
+#define ESP_RMAKER_OTA_FAILED_REASON_ROLLBACK_AFTER_REBOOT "New firmware rolled back after reboot"
+
+/** Post-reboot verification did not pass, and no rollback was detected. */
+#define ESP_RMAKER_OTA_FAILED_REASON_REBOOT_CHECK_FAILED "Reboot check failed"
+
 /** Unknown error */
 #define ESP_RMAKER_OTA_FAILED_REASON_UNKNOWN_ERROR "Unknown error"
 

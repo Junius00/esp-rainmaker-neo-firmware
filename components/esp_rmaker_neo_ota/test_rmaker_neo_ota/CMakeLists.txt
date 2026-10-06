@@ -73,10 +73,18 @@ else ()
     endif ()
 
     set(RMNG_OTA_TEST_NAME rmng-ota-tests)
+    # Partition tests stage OTA slot states, which only the POSIX shim exposes.
+    list(APPEND RMNG_OTA_TEST_SRCS "tests_src/test_ota_partition.c" "tests_src/test_ota_rollback.c")
+    # test_ota_rollback.c includes esp_rmaker_ota.c to reach its static handlers.
+    get_filename_component(RMNG_OTA_CORE_C "${CMAKE_CURRENT_LIST_DIR}/../src/esp_rmaker_ota.c" ABSOLUTE)
+    list(REMOVE_ITEM RMNG_OTA_SRCS ${RMNG_OTA_CORE_C})
     add_executable(${RMNG_OTA_TEST_NAME} ${RMNG_OTA_TEST_SRCS} test_runner_posix.c ${RMNG_OTA_SRCS})
 
     target_include_directories(${RMNG_OTA_TEST_NAME} PUBLIC ${RMNG_OTA_TEST_INCLUDE_DIRS})
-    target_include_directories(${RMNG_OTA_TEST_NAME} PRIVATE ${RMNG_OTA_TEST_PRIV_INCLUDE_DIRS})
+    target_include_directories(
+        ${RMNG_OTA_TEST_NAME} PRIVATE ${RMNG_OTA_TEST_PRIV_INCLUDE_DIRS}
+                                      "${CMAKE_CURRENT_LIST_DIR}/../../osal/ota/priv_include"
+    )
 
     target_link_libraries(
         ${RMNG_OTA_TEST_NAME} PRIVATE ${RMNG_OTA_REQUIRES} ${RMNG_OTA_PRIV_REQUIRES} ${RMNG_OTA_OPT_PRIV_REQUIRES}

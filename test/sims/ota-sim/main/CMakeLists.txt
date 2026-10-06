@@ -11,3 +11,7 @@ set(OTA_SIM_PRIV_REQUIRES
 )
 
 idf_component_register(SRCS ${OTA_SIM_SRCS} PRIV_REQUIRES ${OTA_SIM_PRIV_REQUIRES})
+
+if (OTA_SIM_CRASH_ON_BOOT)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE OTA_SIM_CRASH_ON_BOOT)
+endif ()

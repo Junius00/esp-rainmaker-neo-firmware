@@ -30,6 +30,16 @@ extern "C" {
  */
 bool esp_rmaker_ota_partition_running_is_pending_verify(void);
 
+/**
+ * @brief Check if the bootloader rolled back to the previous firmware
+ *
+ * @note Only meaningful while the running partition is not pending verify. A rolled back
+ * image stays marked invalid until the next update overwrites its slot.
+ *
+ * @return True if an app partition other than the running one is marked invalid, false otherwise
+ */
+bool esp_rmaker_ota_partition_rollback_detected(void);
+
 #ifdef __cplusplus
 }
 #endif

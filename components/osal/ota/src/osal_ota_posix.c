@@ -395,8 +395,8 @@ osal_err_t osal_ota_end(osal_ota_handle_t handle)
         chmod(h->filename, 0755);
     }
 
-    // Set partition state to PENDING_VERIFY
-    osal_err_t rc = osal_ota_posix_config_set_partition_state((uint8_t)h->partition_index, OSAL_OTA_IMG_PENDING_VERIFY);
+    // Set partition state to NEW; the bootloader promotes it to PENDING_VERIFY on first boot
+    osal_err_t rc = osal_ota_posix_config_set_partition_state((uint8_t)h->partition_index, OSAL_OTA_IMG_NEW);
     if (rc != OSAL_ERR_OK) {
         return rc;
     }
@@ -759,8 +759,39 @@ osal_err_t osal_ota_get_state_partition(const osal_ota_partition_t *partition,
 
 const osal_ota_partition_t *osal_ota_get_last_invalid_partition(void)
 {
-    // No invalid partitions on POSIX
-    return NULL;
+    pthread_mutex_lock(&g_ota_mutex);
+    osal_err_t rc = ensure_partitions_initialized();
+    if (rc != OSAL_ERR_OK) {
+        pthread_mutex_unlock(&g_ota_mutex);
+        return NULL;
+    }
+
+    uint8_t boot_idx;
+    if (osal_ota_posix_config_get_boot_partition(&boot_idx) != OSAL_ERR_OK) {
+        boot_idx = 0;
+    }
+
+    // Prefer a slot we do not boot from, the way a rolled back image is left behind
+    const osal_ota_partition_t *found = NULL;
+    for (uint8_t i = 0; i < OSAL_OTA_POSIX_PART_COUNT; i++) {
+        osal_ota_img_states_t state;
+        if (osal_ota_posix_config_get_partition_state(i, &state) != OSAL_ERR_OK) {
+            continue;
+        }
+        if (state != OSAL_OTA_IMG_INVALID && state != OSAL_OTA_IMG_ABORTED) {
+            continue;
+        }
+        if (i != boot_idx) {
+            found = get_partition_by_index(i);
+            break;
+        }
+        if (found == NULL) {
+            found = get_partition_by_index(i);
+        }
+    }
+
+    pthread_mutex_unlock(&g_ota_mutex);
+    return found;
 }
 
 uint8_t osal_ota_get_app_partition_count(void)

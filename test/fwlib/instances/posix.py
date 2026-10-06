@@ -538,12 +538,17 @@ class FirmwareInstanceFactoryPosix(FirmwareInstanceFactory):
         self._remake_build_dir(self.build_dir)
         self._build_executable(self.build_dir, add_configs=add_configs)
 
-    def build_version_binary_if_not_built(self, version_str: str) -> Path:
+    def build_version_binary_if_not_built(
+        self,
+        version_str: str,
+        variant: str = None,
+        cmake_args: list[str] = [],
+    ) -> Path:
         """
         Build a binary with a specific firmware version if it is not built.
         Returns the path to the binary.
         """
-        build_dir = self._get_build_dir(version_str)
+        build_dir = self._get_build_dir(version_str, variant=variant)
         with self._get_build_dir_lock(build_dir):
             if self._is_built_locked(build_dir):
                 return self.partition_helper.get_first_partition_path(build_dir)
@@ -552,10 +557,11 @@ class FirmwareInstanceFactoryPosix(FirmwareInstanceFactory):
             self._remake_build_dir(build_dir)
 
             # Build the executable
-            cmake_args = [
+            build_cmake_args = [
                 f"-DPROJECT_VER={version_str}",
+                *cmake_args,
             ]
-            self._build_executable(build_dir, cmake_args=cmake_args)
+            self._build_executable(build_dir, cmake_args=build_cmake_args)
 
             # Mark as built
             self._mark_as_built_locked(build_dir)
@@ -869,7 +875,12 @@ class FirmwareInstanceFactoryPosixHostCtrl(
             should_log=self.should_log,
         )
 
-    def build_version_binary_if_not_built(self, version_str: str) -> Path:
+    def build_version_binary_if_not_built(
+        self,
+        version_str: str,
+        variant: str = None,
+        cmake_args: list[str] = [],
+    ) -> Path:
         """
         Build a versioned binary and return the executable path.
 
@@ -878,7 +889,7 @@ class FirmwareInstanceFactoryPosixHostCtrl(
         is what the OTA image-header verifier reads. Returning the raw executable
         lets it serve as a cross-project OTA payload for negative tests.
         """
-        build_dir = self._get_build_dir(version_str)
+        build_dir = self._get_build_dir(version_str, variant=variant)
         with self._get_build_dir_lock(build_dir):
             executable_path = build_dir / self.executable_name
             if self._is_built_locked(build_dir):
@@ -886,7 +897,7 @@ class FirmwareInstanceFactoryPosixHostCtrl(
 
             self._remake_build_dir(build_dir)
             self._build_executable(
-                build_dir, cmake_args=[f"-DPROJECT_VER={version_str}"]
+                build_dir, cmake_args=[f"-DPROJECT_VER={version_str}", *cmake_args]
             )
             self._mark_as_built_locked(build_dir)
             return executable_path

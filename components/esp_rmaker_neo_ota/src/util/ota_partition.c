@@ -32,3 +32,16 @@ bool esp_rmaker_ota_partition_running_is_pending_verify(void)
 
     return false;
 }
+
+bool esp_rmaker_ota_partition_rollback_detected(void)
+{
+    const osal_ota_partition_t *running = osal_ota_get_running_partition();
+    if (running == NULL) {
+        return false;
+    }
+
+    /* The bootloader marks a rolled back image invalid, and that slot is never the
+     * one we run now. */
+    const osal_ota_partition_t *last_invalid = osal_ota_get_last_invalid_partition();
+    return (last_invalid != NULL) && (last_invalid->address != running->address);
+}

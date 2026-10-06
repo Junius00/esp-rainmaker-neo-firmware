@@ -45,15 +45,23 @@ emulates OTA slots with files plus a mock bootloader, so the OTA logic in
 Where POSIX genuinely differs in behaviour:
 `osal_ota_erase_last_boot_app_partition()` returns `OSAL_ERR_NOT_SUPPORTED`
 (no flash to erase), `osal_ota_check_rollback_is_possible()` always returns
-`false`, `osal_ota_get_last_invalid_partition()` always returns `NULL`, and
-`osal_ota_mark_app_invalid_rollback_and_reboot()` records the state and then
-`exit()`s with `POSIX_EXIT_REBOOT`.
+`false`, and `osal_ota_mark_app_invalid_rollback_and_reboot()` records the state
+and then `exit()`s with `POSIX_EXIT_REBOOT`.
 
 That exit code is what makes reboots work: `mock_bootloader_posix` — built here
 as a separate executable — `fork()`s and `execv()`s the file for the configured
 boot slot, forwards terminating signals, and relaunches on exit code
 `POSIX_EXIT_REBOOT`. If the configured slot's file is missing it falls back to
-the last-valid slot, which is how rollback is observed on the host.
+the last-valid slot.
+
+The bootloader also mirrors the ESP-IDF rollback policy, so rollback is observed
+on the host the same way it is on hardware. `osal_ota_end()` leaves the written
+slot in `OSAL_OTA_IMG_NEW`; the bootloader promotes it to
+`OSAL_OTA_IMG_PENDING_VERIFY` and gives it one boot to call
+`osal_ota_mark_app_valid_cancel_rollback()`. A target that crashes in that boot
+is relaunched once, the slot is marked `OSAL_OTA_IMG_ABORTED`, and the last-valid
+slot boots. `osal_ota_get_last_invalid_partition()` then reports the aborted
+slot, which is how an application detects that it was rolled back.
 
 ## Build gating
 

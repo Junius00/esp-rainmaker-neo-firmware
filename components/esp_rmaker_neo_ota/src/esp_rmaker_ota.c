@@ -16,6 +16,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <inttypes.h>
+#include <stdatomic.h>
 
 /* Configuration includes */
 #include "sdkconfig.h"
@@ -25,6 +26,7 @@
 #include "osal_mem_alloc.h"
 #include "osal_event_loop.h"
 #include "osal_scheduler.h"
+#include "osal_mqtt_events.h"
 
 /* Private includes */
 #include "ota_jobs.h"
@@ -63,6 +65,11 @@ static rmaker_ota_timeout_handler_handle_t g_rollback_timeout_handler = NULL;
 /* Delayed fetch timer */
 static osal_scheduler_task_handle_t g_delayed_fetch_timer_handle = NULL;
 
+/* Post-MQTT diagnostics callback and its config priv */
+static esp_rmaker_post_ota_diag_t g_post_mqtt_diag = NULL;
+static void *g_post_mqtt_diag_priv = NULL;
+static atomic_flag g_post_mqtt_diag_claimed = ATOMIC_FLAG_INIT;
+
 /* Private function declarations ***************************************************/
 
 /**
@@ -93,12 +100,17 @@ static void esp_rmaker_ota_rollback_timeout_callback(void *unused);
 /**
  * @brief Post MQTT diagnostics handler
  *
- * @param[in] event_handler_arg The argument to pass to the event handler. Expected to be the OTA diagnostics callback.
+ * @param[in] event_handler_arg Unused parameter.
  * @param[in] event_base The event base. Expected to be RMAKER_COMMON_EVENT.
  * @param[in] event_id The event id. Expected to be RMAKER_MQTT_EVENT_CONNECTED.
  * @param[in] event_data The event data. Unused parameter.
  */
 static void esp_rmaker_ota_post_mqtt_diag_handler(void *event_handler_arg, osal_event_base_t event_base, int32_t event_id, void *event_data);
+
+/**
+ * @brief Run the post MQTT diagnostics once, from the event handler or at once if MQTT is already connected
+ */
+static void esp_rmaker_ota_post_mqtt_diag_run(void);
 
 /**
  * @brief Work queue task to fetch OTA with delay
@@ -191,36 +203,40 @@ static void esp_rmaker_ota_handle_reboot(const esp_rmaker_ota_config_t *ota_conf
         // 1. A normal boot without OTA
         // 2. Already rolled back to the previous version
         // 3. No rollback enabled, i.e., CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE is not set
-        // in any of these cases, we set the success status in NVS if there isn't a pending failure report
-        // then trigger the reboot check event to the state machine
-        esp_rmaker_ota_nvs_set_status_if_pending_verification(true, false);
+        // only case 2 is a failure, and the new firmware may have crashed before it could
+        // report one, so ask the partition table instead of assuming success
+        bool rolled_back = esp_rmaker_ota_partition_rollback_detected();
+        if (rolled_back) {
+            OSAL_LOGE(TAG, "Rolled back to the previous firmware, reporting OTA failure");
+        }
+        esp_rmaker_ota_nvs_set_status_if_pending_verification(!rolled_back, false);
         ota_job_state_reboot_check();
         return;
     }
 
     /* Run diagnostics if available */
     if (ota_config->ota_diag == NULL) {
-        OSAL_LOGI(TAG, "No diagnostics function set, skipping diagnostics and marking OTA as valid");
-        esp_rmaker_ota_mark_valid();
-        return;
+        OSAL_LOGI(TAG, "No diagnostics function set, OTA will be marked valid on MQTT connect");
+    } else {
+        esp_rmaker_ota_diag_priv_t ota_diag_priv = {
+            .state = OTA_DIAG_STATE_INIT,
+            .rmaker_ota = true,
+        };
+        esp_rmaker_ota_diag_status_t diag_status = ota_config->ota_diag(&ota_diag_priv, ota_config->priv);
+        if (diag_status == OTA_DIAG_STATUS_FAIL) {
+            OSAL_LOGE(TAG, "Diagnostics failed! Start rollback to the previous version...");
+            esp_rmaker_ota_mark_invalid();
+            return;
+        }
     }
-
-    esp_rmaker_ota_diag_priv_t ota_diag_priv = {
-        .state = OTA_DIAG_STATE_INIT,
-        .rmaker_ota = true,
-    };
-    esp_rmaker_ota_diag_status_t diag_status = ota_config->ota_diag(&ota_diag_priv, ota_config->priv);
-    if (diag_status == OTA_DIAG_STATUS_FAIL) {
-        OSAL_LOGE(TAG, "Diagnostics failed! Start rollback to the previous version...");
-        esp_rmaker_ota_mark_invalid();
-        return;
-    }
+    g_post_mqtt_diag = ota_config->ota_diag;
+    g_post_mqtt_diag_priv = ota_config->priv;
 
     /* --------------- Passed/pending diagnostics --------------- */
     esp_rmaker_error_t err = ESP_RMAKER_OK;
 
     do {
-        /* Start rollback timeout handler */
+        /* Start rollback timeout handler; without it, a reboot still rolls back an unverified image */
         if (g_rollback_timeout_handler == NULL) {
             rmaker_ota_timeout_handler_config_t rollback_timeout_handler_config = {
                 .timeout_ms = CONFIG_RMNG_OTA_ROLLBACK_WAIT_PERIOD * 1000,
@@ -228,23 +244,27 @@ static void esp_rmaker_ota_handle_reboot(const esp_rmaker_ota_config_t *ota_conf
                 .priv_data = NULL,
             };
             err = rmaker_ota_timeout_handler_init(&rollback_timeout_handler_config, &g_rollback_timeout_handler);
-            if (err != ESP_RMAKER_OK) {
-                OSAL_LOGE(TAG, "Failed to initialize rollback timeout handler: %d, will not perform post MQTT diagnostics", err);
-                break;
-            }
         }
-        err = rmaker_ota_timeout_handler_restart(g_rollback_timeout_handler);
+        if (err == ESP_RMAKER_OK) {
+            err = rmaker_ota_timeout_handler_restart(g_rollback_timeout_handler);
+        }
         if (err != ESP_RMAKER_OK) {
-            OSAL_LOGE(TAG, "Failed to start rollback timeout handler: %d, will not perform post MQTT diagnostics", err);
-            break;
+            OSAL_LOGW(TAG, "Failed to start rollback timeout handler: %d, only a reboot will roll back if OTA is not marked as valid", err);
+        } else {
+            OSAL_LOGI(TAG, "Rollback will occur in %" PRIu32 " seconds if OTA is not marked as valid", (uint32_t)CONFIG_RMNG_OTA_ROLLBACK_WAIT_PERIOD);
         }
-        OSAL_LOGI(TAG, "Rollback will occur in %" PRIu32 " seconds if OTA is not marked as valid", (uint32_t)CONFIG_RMNG_OTA_ROLLBACK_WAIT_PERIOD);
 
         /* Register event handler for MQTT connected event */
-        osal_err_t event_loop_err = osal_event_handler_register(RMAKER_COMMON_EVENT, RMAKER_MQTT_EVENT_CONNECTED, esp_rmaker_ota_post_mqtt_diag_handler, ota_config->ota_diag);
+        atomic_flag_clear(&g_post_mqtt_diag_claimed);
+        osal_err_t event_loop_err = osal_event_handler_register(RMAKER_COMMON_EVENT, RMAKER_MQTT_EVENT_CONNECTED, esp_rmaker_ota_post_mqtt_diag_handler, NULL);
         if (event_loop_err != OSAL_ERR_OK) {
             OSAL_LOGE(TAG, "Failed to register post MQTT diagnostics event handler: %d, will not perform post MQTT diagnostics", event_loop_err);
             break;
+        }
+
+        /* Check after the register, so a connect between the check and the register is not lost */
+        if (osal_mqtt_event_get_bits(OSAL_MQTT_CLIENT_CONNECTED_BIT) != 0) {
+            esp_rmaker_ota_post_mqtt_diag_run();
         }
 
         /* Return to avoid marking the OTA as invalid */
@@ -267,14 +287,24 @@ static void esp_rmaker_ota_post_mqtt_diag_handler(void *event_handler_arg, osal_
         OSAL_LOGE(TAG, "Unexpected event received: event_base: %s, event_id: %" PRId32, event_base, event_id);
         return;
     }
+    esp_rmaker_ota_post_mqtt_diag_run();
+}
 
-    OSAL_LOGI(TAG, "MQTT connected event received, performing post MQTT diagnostics");
-    esp_rmaker_post_ota_diag_t ota_diag = (esp_rmaker_post_ota_diag_t)event_handler_arg;
-    esp_rmaker_ota_diag_priv_t ota_diag_priv = {
-        .state = OTA_DIAG_STATE_POST_MQTT,
-        .rmaker_ota = true,
-    };
-    esp_rmaker_ota_diag_status_t diag_status = ota_diag(&ota_diag_priv, event_handler_arg);
+static void esp_rmaker_ota_post_mqtt_diag_run(void)
+{
+    if (atomic_flag_test_and_set(&g_post_mqtt_diag_claimed)) {
+        return;
+    }
+
+    OSAL_LOGI(TAG, "MQTT connected, performing post MQTT diagnostics");
+    esp_rmaker_ota_diag_status_t diag_status = OTA_DIAG_STATUS_SUCCESS;
+    if (g_post_mqtt_diag != NULL) {
+        esp_rmaker_ota_diag_priv_t ota_diag_priv = {
+            .state = OTA_DIAG_STATE_POST_MQTT,
+            .rmaker_ota = true,
+        };
+        diag_status = g_post_mqtt_diag(&ota_diag_priv, g_post_mqtt_diag_priv);
+    }
     switch (diag_status) {
     case OTA_DIAG_STATUS_FAIL:
         OSAL_LOGE(TAG, "Post MQTT diagnostics failed! Start rollback to the previous version...");
@@ -296,7 +326,10 @@ static void esp_rmaker_ota_post_mqtt_diag_handler(void *event_handler_arg, osal_
     osal_err_t event_loop_err = osal_event_handler_unregister(RMAKER_COMMON_EVENT, RMAKER_MQTT_EVENT_CONNECTED, esp_rmaker_ota_post_mqtt_diag_handler);
     if (event_loop_err != OSAL_ERR_OK) {
         OSAL_LOGE(TAG, "Failed to unregister post MQTT diagnostics event handler: %d", event_loop_err);
+        return;
     }
+    g_post_mqtt_diag = NULL;
+    g_post_mqtt_diag_priv = NULL;
 }
 
 static void esp_rmaker_ota_delayed_fetch_timer_task(void *unused)
@@ -604,11 +637,10 @@ esp_rmaker_error_t esp_rmaker_ota_mark_invalid(void)
         g_rollback_timeout_handler = NULL;
     }
 
-    /* Force set the failed status in NVS */
+    /* Force set the failed status in NVS; the next boot detects the rollback without it */
     err = esp_rmaker_ota_nvs_set_status_if_pending_verification(false, true);
     if (err != ESP_RMAKER_OK) {
-        OSAL_LOGE(TAG, "Failed to set failed status: %d", err);
-        return err;
+        OSAL_LOGE(TAG, "Failed to set failed status: %d, rolling back anyway", err);
     }
 
     /* Mark the OTA as invalid */
