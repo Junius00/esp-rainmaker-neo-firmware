@@ -85,6 +85,7 @@ static ota_job_id_queue_t g_ota_job_id_queue = {
 #define OTA_ERROR_RETRY_MAX_DELAY_MS (5 * 60 * 1000)
 static esp_rmaker_backoff_retry_context_t g_error_retry_context = {
     .handle = NULL,
+    .reset_gen = 0,
     .delay_ctx = {
         .delay_ms = {
             .current = OTA_ERROR_RETRY_BASE_DELAY_MS,
@@ -101,6 +102,7 @@ static esp_rmaker_backoff_retry_context_t g_error_retry_context = {
  * Governs re-subscribe on disconnect/reconnect and SUBACK failure. */
 static esp_rmaker_backoff_retry_context_t g_sub_retry_ctx = {
     .handle = NULL,
+    .reset_gen = 0,
     .delay_ctx = {
         .delay_ms = {
             .current = OTA_ERROR_RETRY_BASE_DELAY_MS,
@@ -119,6 +121,7 @@ static esp_rmaker_backoff_retry_context_t g_sub_retry_ctx = {
  * (see ota_job_state_post_terminal_event). */
 static esp_rmaker_backoff_retry_context_t g_terminal_retry_ctx = {
     .handle = NULL,
+    .reset_gen = 0,
     .delay_ctx = {
         .delay_ms = {
             .current = OTA_ERROR_RETRY_BASE_DELAY_MS,

@@ -61,6 +61,9 @@ int test_rmng_common_all_tests_unity(void)
 
     /* Retry **********************************************************************/
     RUN_TEST(test_backoff_retry_successful_schedule);
+    RUN_TEST(test_backoff_race_reset_vs_retry);
+    RUN_TEST(test_backoff_race_concurrent_schedule);
+    RUN_TEST(test_backoff_race_reset_during_retry);
 
     return UNITY_END();
 }

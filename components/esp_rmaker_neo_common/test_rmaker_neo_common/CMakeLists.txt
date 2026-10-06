@@ -9,6 +9,7 @@ set(RMNG_COMMON_TEST_SRCS
     "tests_src/util/test_nvs.c"
     "tests_src/util/test_crypto.c"
     "tests_src/retry/test_backoff.c"
+    "tests_src/retry/test_backoff_race.c"
     # Test suite
     "test_all.c"
 )
