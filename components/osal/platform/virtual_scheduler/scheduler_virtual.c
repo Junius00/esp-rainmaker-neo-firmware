@@ -34,6 +34,9 @@
 // This is to prevent a periodic task from having too many executions due to time advancement.
 #define VIRTUAL_SCHEDULER_EXECUTIONS_MAX CONFIG_OSAL_VIRTUAL_SCHEDULER_EXECUTIONS_MAX
 
+/* Due time of a fired or stopped task; it stays in the list, so deinit frees it. */
+#define VIRTUAL_SCHEDULER_PARKED_MS UINT64_MAX
+
 /* Types ************************************************************************/
 
 /**
@@ -236,6 +239,16 @@ static __scheduled_task_t *__scheduled_task_pop(void)
 }
 
 /**
+ * @brief Park a task at the end of the list, where it is never due.
+ * @param[in] t The scheduled task, not in the list.
+ */
+static void __scheduled_task_park(__scheduled_task_t *t)
+{
+    t->due_time_ms = VIRTUAL_SCHEDULER_PARKED_MS;
+    __scheduled_task_add(t);
+}
+
+/**
  * @brief Remove a scheduled task from the list.
  * @note The task is not freed.
  * @param[in] t The scheduled task to remove.
@@ -314,6 +327,7 @@ static void __virtual_scheduler_task(void *arg)
             /* For one-shot tasks, set the number of executions to 1 */
             else {
                 t->num_executions = 1;
+                __scheduled_task_park(t);
             }
 
             __scheduled_task_t *copy = (__scheduled_task_t *)OSAL_CALLOC_EXTRAM(1, sizeof(__scheduled_task_t));
@@ -442,6 +456,7 @@ osal_err_t osal_scheduler_stop_timer(osal_scheduler_task_handle_t handle)
     __scheduled_task_t *t = (__scheduled_task_t *)handle;
     __scheduled_tasks_lock();
     __scheduled_task_remove(t);
+    __scheduled_task_park(t);
     __scheduled_tasks_unlock();
     return OSAL_ERR_OK;
 }

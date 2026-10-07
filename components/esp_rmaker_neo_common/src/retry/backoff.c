@@ -41,17 +41,18 @@ static esp_rmaker_error_t esp_rmaker_backoff_schedule_task(esp_rmaker_backoff_re
 
 static uint64_t backoff_get_next_delay_ms(esp_rmaker_backoff_delay_context_t *p_delay_ctx)
 {
-    /* Get the next delay with jitter */
-    uint64_t next_delay_ms = p_delay_ctx->delay_ms.current + (osal_random_generate() % (p_delay_ctx->params.max_jitter_ms + 1));
+    /* Increment the delay; the CAS loop keeps concurrent retries from losing a step */
+    uint64_t current = __atomic_load_n(&p_delay_ctx->delay_ms.current, __ATOMIC_ACQUIRE);
+    uint64_t next;
+    do {
+        next = current * p_delay_ctx->params.exp_factor;
+        if (next > p_delay_ctx->delay_ms.max) {
+            next = p_delay_ctx->delay_ms.max;
+        }
+    } while (!__atomic_compare_exchange_n(&p_delay_ctx->delay_ms.current, &current, next, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
 
-    /* Increment the delay */
-    p_delay_ctx->delay_ms.current *= p_delay_ctx->params.exp_factor;
-    if (p_delay_ctx->delay_ms.current > p_delay_ctx->delay_ms.max) {
-        p_delay_ctx->delay_ms.current = p_delay_ctx->delay_ms.max;
-    }
-
-    /* Return the next delay */
-    return next_delay_ms;
+    /* Return the previous delay with jitter */
+    return current + (osal_random_generate() % (p_delay_ctx->params.max_jitter_ms + 1));
 }
 
 static esp_rmaker_error_t esp_rmaker_backoff_schedule_task(esp_rmaker_backoff_retry_context_t *p_retry_context, uint64_t delay_ms, osal_scheduler_task_t task, void *arg)
@@ -60,11 +61,27 @@ static esp_rmaker_error_t esp_rmaker_backoff_schedule_task(esp_rmaker_backoff_re
         return ESP_RMAKER_INVALID_ARG;
     }
 
+    uint32_t reset_gen = __atomic_load_n(&p_retry_context->reset_gen, __ATOMIC_ACQUIRE);
+
+    /* Take the handle out of the context, so that no other task can cancel or re-arm it meanwhile */
+    osal_scheduler_task_handle_t handle = __atomic_exchange_n(&p_retry_context->handle, NULL, __ATOMIC_ACQ_REL);
     osal_err_t err;
-    if (p_retry_context->handle != NULL) {
-        err = osal_scheduler_reset_timer(p_retry_context->handle, delay_ms);
+    if (handle != NULL) {
+        err = osal_scheduler_reset_timer(handle, delay_ms);
     } else {
-        err = osal_scheduler_schedule_task(&p_retry_context->handle, delay_ms, task, arg);
+        err = osal_scheduler_schedule_task(&handle, delay_ms, task, arg);
+    }
+
+    /* Put the handle back; if a concurrent call installed its own timer, cancel this one */
+    osal_scheduler_task_handle_t expected = NULL;
+    if (handle != NULL && !__atomic_compare_exchange_n(&p_retry_context->handle, &expected, handle, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        (void) osal_scheduler_cancel_task(&handle);
+    } else if (handle != NULL && __atomic_load_n(&p_retry_context->reset_gen, __ATOMIC_ACQUIRE) != reset_gen) {
+        /* A reset ran meanwhile and found no handle; remove this timer unless another call took it */
+        expected = handle;
+        if (__atomic_compare_exchange_n(&p_retry_context->handle, &expected, NULL, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+            (void) osal_scheduler_cancel_task(&handle);
+        }
     }
     return err == OSAL_ERR_OK ? ESP_RMAKER_OK : ESP_RMAKER_FAIL;
 }
@@ -77,19 +94,15 @@ void esp_rmaker_backoff_reset(esp_rmaker_backoff_retry_context_t *p_retry_contex
         return;
     }
 
-    /* Cancel any existing retries */
-    if (p_retry_context->handle != NULL) {
-        (void) osal_scheduler_cancel_task(&p_retry_context->handle);
-        /*
-         * Always drop our handle after attempting cancel. If the scheduler was
-         * already deinitialized, cancel returns without nulling the out pointer,
-         * which would otherwise leave a dangling handle for a later execute/resume.
-         */
-        p_retry_context->handle = NULL;
+    /* Cancel any existing retries; increment the generation first, so that a retry in progress sees it */
+    __atomic_add_fetch(&p_retry_context->reset_gen, 1, __ATOMIC_ACQ_REL);
+    osal_scheduler_task_handle_t handle = __atomic_exchange_n(&p_retry_context->handle, NULL, __ATOMIC_ACQ_REL);
+    if (handle != NULL) {
+        (void) osal_scheduler_cancel_task(&handle);
     }
 
     /* Reset the delay */
-    p_retry_context->delay_ctx.delay_ms.current = delay_ms;
+    __atomic_store_n(&p_retry_context->delay_ctx.delay_ms.current, delay_ms, __ATOMIC_RELEASE);
 }
 
 esp_rmaker_error_t esp_rmaker_backoff_retry(esp_rmaker_backoff_retry_context_t *p_retry_context, osal_scheduler_task_t task, void *arg)
@@ -108,6 +121,6 @@ esp_rmaker_error_t esp_rmaker_backoff_fire(esp_rmaker_backoff_retry_context_t *p
         return ESP_RMAKER_INVALID_ARG;
     }
 
-    uint64_t next_delay_ms = p_retry_context->delay_ctx.delay_ms.current;
+    uint64_t next_delay_ms = __atomic_load_n(&p_retry_context->delay_ctx.delay_ms.current, __ATOMIC_ACQUIRE);
     return esp_rmaker_backoff_schedule_task(p_retry_context, next_delay_ms, task, arg);
 }

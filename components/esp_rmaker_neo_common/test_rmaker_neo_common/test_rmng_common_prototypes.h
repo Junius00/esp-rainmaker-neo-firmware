@@ -219,6 +219,21 @@ void test_rmaker_gen_csr_pem_errors(void);
  */
 void test_backoff_retry_successful_schedule(void);
 
+/**
+ * @brief Test that retry does not re-arm a timer that a concurrent reset cancels.
+ */
+void test_backoff_race_reset_vs_retry(void);
+
+/**
+ * @brief Test that two concurrent retries on an idle context schedule one timer.
+ */
+void test_backoff_race_concurrent_schedule(void);
+
+/**
+ * @brief Test that a reset cancels the timer of a retry that is in progress.
+ */
+void test_backoff_race_reset_during_retry(void);
+
 /* All tests ******************************************************************/
 
 /**

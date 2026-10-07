@@ -51,6 +51,7 @@ typedef struct {
 /** Context of a scheduled backoff retry */
 typedef struct {
     osal_scheduler_task_handle_t handle; /**< The handle for the scheduled task */
+    uint32_t reset_gen; /**< Reset count, so that a retry in progress can detect a concurrent reset */
     esp_rmaker_backoff_delay_context_t delay_ctx; /**< The backoff delay context for the retry algorithm */
 } esp_rmaker_backoff_retry_context_t;
 
@@ -64,6 +65,7 @@ typedef struct {
  */
 #define ESP_RMAKER_BACKOFF_DEFAULT_RETRY_CONTEXT() (esp_rmaker_backoff_retry_context_t) { \
     .handle = NULL, \
+    .reset_gen = 0, \
     .delay_ctx = { \
         .delay_ms = { \
             .current = 1000, /* 1 second */ \
@@ -85,8 +87,9 @@ extern "C" {
 /**
  * @brief Reset the backoff retry.
  *
- * - Cancels any scheduled retries.
+ * - Cancels any scheduled retries, also a retry that another task has in progress.
  * - Resets the delay to the initial base delay.
+ * @note A retry task that the timer already started still runs.
  * @param[in, out] p_retry_context The context for the backoff function.
  * @param[in] delay_ms The delay in milliseconds.
  */
